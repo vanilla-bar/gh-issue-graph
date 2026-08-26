@@ -25,8 +25,13 @@ func New() *Loader { return &Loader{started: time.Now().UTC()} }
 
 const viewer = "octocat"
 
+// One picture for everybody in the fixture. It is the identicon GitHub serves
+// for its own mascot, so the demo needs no bundled image and no network call
+// that could reveal who is running it.
+const avatar = "https://avatars.githubusercontent.com/u/583231?v=4"
+
 func user(login string) graph.User {
-	return graph.User{Login: login, AvatarURL: "https://avatars.githubusercontent.com/u/583231?v=4"}
+	return graph.User{Login: login, AvatarURL: avatar}
 }
 
 // Load implements server.Loader.
@@ -163,15 +168,32 @@ func (l *Loader) Load(ctx context.Context, options graph.SearchOptions, progress
 	pr210.Links = []graph.IssueLink{link(ready, graph.LinkCloses)}
 	pr210.CIState = "SUCCESS"
 	pr210.ReviewDecision = "APPROVED"
+	// Approved by one of two: the second reviewer has not answered yet.
+	pr210.Reviewers = []graph.Reviewer{
+		{Login: "hubot", AvatarURL: avatar, Requested: true},
+		{Login: "mona", AvatarURL: avatar, State: graph.ReviewApproved},
+	}
+	pr210.ReviewApproved, pr210.ReviewTotal = 1, 2
 
 	pr211 := pr("PR_211", 211, "feat: Markdown import to intermediate representation", "OPEN", fuga, "feat/issue-120-md-import", "feat/issue-120-md-ir")
 	pr211.Links = []graph.IssueLink{link(ready, graph.LinkRefs)}
 	pr211.CIState = "PENDING"
 	pr211.IsDraft = true
+	// A team was asked, and a team has no avatar to draw.
+	pr211.Reviewers = []graph.Reviewer{{Login: "recipe-app", Requested: true, IsTeam: true}}
+	pr211.ReviewTotal = 1
 
 	// Unlinked but open: work that never got an issue.
 	pr220 := pr("PR_220", 220, "chore: refresh the review checklist", "OPEN", fuga, "dev", "chore/review-checklist")
 	pr220.CIState = "FAILURE"
+	// Changes were requested and the author pushed since, so the same reviewer
+	// is being waited on again.
+	pr220.ReviewDecision = "CHANGES_REQUESTED"
+	pr220.Reviewers = []graph.Reviewer{
+		{Login: "mona", AvatarURL: avatar, State: graph.ReviewChangesRequested, Requested: true},
+	}
+	pr220.ReviewTotal = 1
+	pr220.ReReviewRequested = true
 
 	// Waiting on your review. Authored by somebody else, so no issue search of
 	// yours would ever return it.
@@ -181,6 +203,14 @@ func (l *Loader) Load(ctx context.Context, options graph.SearchOptions, progress
 	pr230.CIState = "SUCCESS"
 	pr230.ReviewDecision = "REVIEW_REQUIRED"
 	pr230.ReviewRequested = true
+	// You have a review open and unsubmitted: nobody else can see it, which is
+	// why the card says so.
+	pr230.Reviewers = []graph.Reviewer{
+		{Login: viewer, AvatarURL: avatar, Requested: true},
+		{Login: "hubot", AvatarURL: avatar, State: "COMMENTED"},
+	}
+	pr230.ReviewTotal = 2
+	pr230.ViewerPendingReview = true
 
 	pr400 := pr("PR_400", 400, "fix: clear the reminder after a snooze", "MERGED", piyo, "main", "fix/300-snooze")
 	pr400.Links = []graph.IssueLink{link(lingering, graph.LinkRefs)}
