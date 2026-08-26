@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.2.0
+
+Folding, reading and reviewing. The board could show you where the work was;
+this release is about what you do once you have found it.
+
+- **Fold a sub-issue tree.** The `4/6` progress chip becomes a button when
+  children are drawn below it: click it to take that whole subtree away, pull
+  requests included.
+- **Tuck a card into a line.** An issue you have filed but are not working on
+  keeps its place without keeping its space — 113px down to 30px, with its
+  sub-issues and pull requests going under the line with it. The line says what
+  it carried, as `3 sub · 3 PRs`.
+- **The board remembers what you shut.** Lanes were already remembered; the
+  folds inside them and the tucked cards are now too. `unfold all` opens the
+  folds and leaves tucked cards tucked, because those are different decisions.
+- **Review state on a pull request card.** How many of the people asked have
+  approved, as `1/2`, with a face for each reviewer: a green ring approved, a
+  red one asked for changes, a dim one has not answered. A re-review and your
+  own unsubmitted draft each get a mark.
+- **Read the body without leaving.** Click a card and a panel slides in from the
+  right with the body in it, the last twenty comments under that, and the
+  reviewers, labels and relations beside it. `⧉` copies the GitHub link. GitHub
+  renders the Markdown, so this still ships no Markdown library.
+
 ## v0.1.0
 
 First release.
