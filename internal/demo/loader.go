@@ -34,6 +34,87 @@ func user(login string) graph.User {
 	return graph.User{Login: login, AvatarURL: avatar}
 }
 
+// Detail implements server.Detailer. The bodies are canned like everything else
+// here, and cover what the drawer has to lay out: headings, a list, a table,
+// code and a quote.
+func (l *Loader) Detail(ctx context.Context, id string) (graph.Detail, error) {
+	body, ok := demoBodies[id]
+	if !ok {
+		body = "<p><em>No description provided.</em></p>"
+	}
+	said := demoComments(l.started, id)
+	return graph.Detail{ID: id, BodyHTML: body, Comments: said, CommentTotal: demoTotals(id, len(said))}, nil
+}
+
+// demoComments covers what the panel has to lay out: an ordinary comment, a
+// review that asked for changes, and a reply to it.
+func demoComments(now time.Time, id string) []graph.Comment {
+	ago := func(h int) time.Time { return now.Add(-time.Duration(h) * time.Hour) }
+	switch id {
+	case "PR_210":
+		return []graph.Comment{
+			{Author: user("mona"), CreatedAt: ago(20), ReviewState: graph.ReviewChangesRequested,
+				BodyHTML: `<p>The parser reads the whole file into memory. For the sizes we expect that is
+fine, but it is worth a note in the code so nobody is surprised later.</p>`},
+			{Author: user(viewer), CreatedAt: ago(19),
+				BodyHTML: `<p>Added the note, and a guard at 8 MB that falls back to streaming.</p>`},
+			{Author: user("mona"), CreatedAt: ago(18), ReviewState: graph.ReviewApproved,
+				BodyHTML: `<p>Reads well now. Thanks.</p>`},
+		}
+	case "PR_220":
+		return []graph.Comment{
+			{Author: user("mona"), CreatedAt: ago(6), ReviewState: graph.ReviewChangesRequested,
+				BodyHTML: `<p>The checklist still tells people to run the old script. That step should go.</p>`},
+		}
+	case "I_100":
+		return []graph.Comment{
+			{Author: user("hubot"), CreatedAt: ago(30),
+				BodyHTML: `<p>Does this change the export format? Anything reading the old shape will need a version bump.</p>`},
+			{Author: user(viewer), CreatedAt: ago(29),
+				BodyHTML: `<p>It does. The exporter writes <code>schema: 2</code> and the importer reads both.</p>`},
+		}
+	}
+	return nil
+}
+
+// A fixed extra so the "and N more" line has something to say in the demo.
+func demoTotals(id string, kept int) int {
+	if id == "PR_210" {
+		return kept + 4
+	}
+	return kept
+}
+
+// The fixture's bodies, as GitHub would render them: plain HTML with no style
+// attributes, which is exactly what the CSP allows through.
+var demoBodies = map[string]string{
+	"I_100": `<h2>Why</h2>
+<p>Steps currently belong to the account rather than to a recipe, so two recipes
+cannot have a step with the same name. Moving them under the recipe fixes that
+and lets a recipe be copied whole.</p>
+<h2>Shape</h2>
+<table><thead><tr><th>Before</th><th>After</th></tr></thead>
+<tbody><tr><td><code>account/steps</code></td><td><code>recipe/steps</code></td></tr>
+<tr><td>flat</td><td>nested</td></tr></tbody></table>
+<h2>Order</h2>
+<ol><li>Write the decision down (#101)</li>
+<li>Move the editor over (#102)</li>
+<li>Warn before a delete takes notes with it (#103)</li></ol>
+<blockquote><p>Migration runs on first launch and is not reversible.</p></blockquote>`,
+	"I_120": `<p>Import a recipe from a Markdown file so it can be kept in a repository.</p>
+<pre><code>gh recipe import ./dinner.md
+</code></pre>
+<ul><li>Headings become steps</li><li>A list under a heading becomes its ingredients</li>
+<li>Anything else is kept as a note</li></ul>`,
+	"PR_210": `<p>Closes #120.</p>
+<p>Parses the file into the intermediate representation from PR #211, then writes
+it through the normal recipe path so nothing new touches the database.</p>`,
+	"PR_230": `<p>Closes #130.</p>
+<p>The 1x set was picked whichever screen asked, so a high-DPI display scaled it
+up and blurred it. This reads <code>devicePixelRatio</code> and asks for the 2x
+set above 1.5.</p>`,
+}
+
 // Load implements server.Loader.
 func (l *Loader) Load(ctx context.Context, options graph.SearchOptions, progress github.Progress) (graph.Input, error) {
 	if progress != nil {

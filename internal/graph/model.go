@@ -35,6 +35,37 @@ type Reviewer struct {
 	IsTeam bool `json:"isTeam,omitempty"`
 }
 
+// Detail is what a card cannot hold: the body of an issue or a pull request,
+// fetched only when somebody asks to read it.
+//
+// BodyHTML is GitHub's own rendering, which is why this module needs no Markdown
+// library. It is dropped into the page as HTML, so the server's CSP is what
+// stands between it and anything unwanted: script-src 'self' means nothing in it
+// can execute.
+type Detail struct {
+	ID       string `json:"id"`
+	BodyHTML string `json:"bodyHtml"`
+	// Comments is the tail of the conversation, oldest first. Reviews that
+	// carry no words of their own are left out: an approval with nothing said
+	// is already on the card as part of the count.
+	Comments []Comment `json:"comments,omitempty"`
+	// CommentTotal counts everything there is, before the tail was taken. A
+	// list cut short without saying so reads as the whole conversation.
+	CommentTotal int `json:"commentTotal,omitempty"`
+}
+
+// Comment is one thing somebody said, either in the conversation or as the
+// body of a review.
+type Comment struct {
+	Author    User      `json:"author"`
+	BodyHTML  string    `json:"bodyHtml"`
+	CreatedAt time.Time `json:"createdAt"`
+	URL       string    `json:"url,omitempty"`
+	// ReviewState is APPROVED / CHANGES_REQUESTED / COMMENTED for a review, and
+	// empty for an ordinary comment.
+	ReviewState string `json:"reviewState,omitempty"`
+}
+
 // Label is a GitHub issue label.
 type Label struct {
 	Name  string `json:"name"`

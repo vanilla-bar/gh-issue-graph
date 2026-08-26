@@ -138,6 +138,28 @@ Which repositories you opened, what you folded inside them and which cards you
 tucked are all remembered in `localStorage`, so you land back where you were
 after a reload. `unfold all` opens the folds; it leaves tucked cards tucked.
 
+### Reading a body
+
+Click a card anywhere that is not a link or a button and a panel slides in from
+the right with the body in it. `✕`, Escape, or a click outside closes it. `⧉` in
+the corner copies the issue's or pull request's GitHub URL to the clipboard —
+the link that opens on somebody else's machine, which this board on 127.0.0.1
+never will.
+
+The body is GitHub's own HTML, fetched one issue or pull request at a time and
+only when you open one; what you have already read is not fetched again until
+you reload.
+
+The conversation follows it: the last twenty comments, along with any review
+that said something, marked `approved` or `requested changes`. Anything older
+than that is counted rather than dropped silently. A review that approved
+without a word is left out — it is already in the count on the card.
+
+The column beside it lists the assignees, labels, type and milestone, the
+reviewers and where each one stands for a pull request, and the parents,
+children, blockers and linked pull requests. All of it comes from the first
+load, so nothing extra is requested for it.
+
 ### Edges
 
 | Line | Meaning |

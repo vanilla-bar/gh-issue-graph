@@ -55,6 +55,8 @@ const brand = document.getElementById('brand')
 const sortField = document.getElementById('sort')
 const foldAllButton = document.getElementById('fold-all')
 const unfoldAllButton = document.getElementById('unfold-all')
+const drawer = document.getElementById('drawer')
+const scrim = document.getElementById('scrim')
 
 const fields = {
   repo: document.getElementById('repo'),
@@ -1253,6 +1255,253 @@ function restoreViewport(anchor) {
   viewport.scrollTop = position.top - anchor.offsetY
 }
 
+// ----------------------------------------------------------------- the drawer
+
+// Bodies already fetched, keyed by node id. The board carries no bodies at all:
+// a hundred of them would be a hundred times the payload for text nobody has
+// asked to read. They are fetched on opening and kept for the session, so going
+// back to a card you have already read costs nothing.
+const bodies = new Map()
+let openNodeID = null
+let openURL = null
+
+function closeDrawer() {
+  openNodeID = null
+  drawer.hidden = true
+  scrim.hidden = true
+  drawer.classList.remove('is-open')
+}
+
+// A chip in the drawer header: the issue's parent, or the repository it is in.
+function headChip(text, href, title) {
+  const inner = escapeHTML(text)
+  const attrs = `class="drawer-chip" title="${escapeHTML(title || text)}"`
+  return href
+    ? `<a ${attrs} href="${escapeHTML(href)}" target="_blank" rel="noreferrer">${inner}</a>`
+    : `<span ${attrs}>${inner}</span>`
+}
+
+// One row of the side column: a heading and whatever belongs under it.
+function sideBlock(heading, body) {
+  if (!body) return ''
+  return `<section class="side-block"><h3>${escapeHTML(heading)}</h3>${body}</section>`
+}
+
+// The related nodes, as links. Everything here is already in memory — this is
+// the graph the board drew, read back out for one node.
+function relationsHTML(node) {
+  if (!sourceData) return ''
+  const byID = new Map(sourceData.nodes.map((n) => [n.id, n]))
+  const nameOf = (id) => {
+    // An issue's relations name other issues by GitHub's own id; the board keys
+    // its nodes by a prefixed one so an issue and a pull request cannot collide.
+    // Try the id as given first, in case it is already a node id.
+    const other = byID.get(id) || byID.get(`issue:${id}`) || byID.get(`pr:${id}`)
+    if (!other) return null
+    const item = other.kind === 'issue' ? other.issue : other.pullRequest
+    const mark = other.kind === 'issue' ? '#' : 'PR #'
+    return `<li><a href="${escapeHTML(item.url)}" target="_blank" rel="noreferrer">${mark}${item.number}</a> ${escapeHTML(item.title)}</li>`
+  }
+  const list = (ids) => {
+    const rows = (ids || []).map(nameOf).filter(Boolean)
+    return rows.length ? `<ul class="side-list">${rows.join('')}</ul>` : ''
+  }
+
+  const out = []
+  if (node.kind === 'issue') {
+    const issue = node.issue
+    out.push(sideBlock('Sub-issues', list(issue.subIssueIds)))
+    out.push(sideBlock('Blocked by', list(issue.blockedByIds)))
+    out.push(sideBlock('Blocks', list(issue.blockingIds)))
+    if (issue.duplicateOfId) out.push(sideBlock('Duplicate of', list([issue.duplicateOfId])))
+    // Its pull requests come from the edges rather than the issue: the issue
+    // itself never learns which pull requests point at it.
+    const prIDs = sourceData.edges
+      .filter((edge) => edge.source === node.id && edge.kind.startsWith('pr-'))
+      .map((edge) => edge.target)
+    out.push(sideBlock('Pull requests', list(prIDs)))
+  } else {
+    const issueIDs = sourceData.edges
+      .filter((edge) => edge.target === node.id && edge.kind.startsWith('pr-'))
+      .map((edge) => edge.source)
+    out.push(sideBlock('Implements', list(issueIDs)))
+  }
+  return out.join('')
+}
+
+// The facts that fit in a column: who it is on, how it is labelled, when it moved.
+function factsHTML(node) {
+  const item = node.kind === 'issue' ? node.issue : node.pullRequest
+  const out = []
+  const people = node.kind === 'issue' ? item.assignees || [] : (item.author ? [item.author] : [])
+  if (people.length) {
+    out.push(sideBlock(node.kind === 'issue' ? 'Assignees' : 'Author', `<ul class="side-people">${people.map((who) =>
+      `<li><img class="avatar" src="${escapeHTML(who.avatarUrl || '')}" alt="">${escapeHTML(who.login)}</li>`).join('')}</ul>`))
+  }
+  if (node.kind === 'pullRequest' && (item.reviewers || []).length) {
+    // Already on the card as rings on avatars; here there is room to say who
+    // they are and what each one said, which is the question the panel is open
+    // to answer.
+    const heading = item.reviewTotal ? `Reviewers  ${item.reviewApproved}/${item.reviewTotal}` : 'Reviewers'
+    out.push(sideBlock(heading, `<ul class="side-people reviewers-list">${item.reviewers.map((who) => {
+      const said = who.state === 'APPROVED' ? 'approved'
+        : who.state === 'CHANGES_REQUESTED' ? 'requested changes'
+          : who.state === 'COMMENTED' ? 'commented'
+            : who.requested ? 'review requested' : 'no review yet'
+      const face = who.isTeam || !who.avatarUrl
+        ? `<span class="avatar face team">${escapeHTML(who.login.slice(0, 1).toUpperCase())}</span>`
+        : `<img class="avatar" src="${escapeHTML(who.avatarUrl)}" alt="">`
+      return `<li>${face}<span class="who"><span class="login">${escapeHTML(who.login)}</span><span class="said">${escapeHTML(said)}${who.requested && who.state ? ', asked again' : ''}</span></span></li>`
+    }).join('')}</ul>`))
+  }
+  if (node.kind === 'issue' && (item.labels || []).length) {
+    out.push(sideBlock('Labels', `<div class="side-chips">${item.labels.map((label) =>
+      `<span class="chip label"><i class="dot" data-colour="${labelColour(label.color)}"></i>${escapeHTML(label.name)}</span>`).join('')}</div>`))
+  }
+  if (node.kind === 'issue' && item.issueType) {
+    out.push(sideBlock('Type', `<span class="chip type">${escapeHTML(item.issueType.name)}</span>`))
+  }
+  if (node.kind === 'issue' && item.milestone) {
+    out.push(sideBlock('Milestone', `<p class="side-plain">${escapeHTML(item.milestone)}</p>`))
+  }
+  if (item.updatedAt) {
+    out.push(sideBlock('Updated', `<p class="side-plain">${escapeHTML(relativeTime(item.updatedAt))}</p>`))
+  }
+  return out.join('')
+}
+
+// The tail of the conversation, under the body. Reviews carry what they were:
+// an approval reads differently from the same words with changes requested
+// attached, and the card only ever showed the count.
+function commentsHTML(detail) {
+  const said = (detail && detail.comments) || []
+  if (!said.length) return ''
+  const rows = said.map((comment) => {
+    const state = comment.reviewState === 'APPROVED' ? 'approved'
+      : comment.reviewState === 'CHANGES_REQUESTED' ? 'requested changes'
+        : comment.reviewState ? 'reviewed' : ''
+    const kind = comment.reviewState === 'APPROVED' ? 'ok'
+      : comment.reviewState === 'CHANGES_REQUESTED' ? 'bad' : 'warn'
+    const who = comment.author || {}
+    const head = [
+      who.avatarUrl ? `<img class="avatar" src="${escapeHTML(who.avatarUrl)}" alt="">` : '',
+      `<span class="login">${escapeHTML(who.login || 'ghost')}</span>`,
+      state ? `<span class="said ${kind}">${escapeHTML(state)}</span>` : '',
+      `<span class="when">${escapeHTML(relativeTime(comment.createdAt))}</span>`,
+    ].join('')
+    return `<article class="comment"><header>${head}</header><div class="rendered">${comment.bodyHtml || ''}</div></article>`
+  })
+  const hidden = (detail.commentTotal || said.length) - said.length
+  // Cutting a thread short without saying so reads as the whole conversation.
+  const more = hidden > 0
+    ? `<p class="side-plain more-said">${hidden} earlier comment${hidden === 1 ? '' : 's'} not shown.</p>`
+    : ''
+  return `<section class="conversation"><h3>Conversation</h3>${more}${rows.join('')}</section>`
+}
+
+async function openDrawer(nodeID) {
+  const node = sourceData && sourceData.nodes.find((n) => n.id === nodeID)
+  if (!node || node.kind === 'repository') return
+  openNodeID = nodeID
+  const item = node.kind === 'issue' ? node.issue : node.pullRequest
+
+  const state = node.kind === 'issue'
+    ? (item.state === 'CLOSED' ? 'closed' : item.actionable ? 'ready' : 'open')
+    : (item.state === 'MERGED' ? 'merged' : item.isDraft ? 'draft' : item.state.toLowerCase())
+  const stateEl = document.getElementById('drawer-state')
+  stateEl.className = `drawer-state ${state}`
+  stateEl.textContent = state
+
+  const numberEl = document.getElementById('drawer-number')
+  numberEl.textContent = `${node.kind === 'issue' ? '#' : 'PR #'}${item.number}`
+  numberEl.href = item.url
+  openURL = item.url
+  document.getElementById('drawer-repo').textContent = item.repository || ''
+  document.getElementById('drawer-title').textContent = item.title
+
+  const chips = []
+  if (node.kind === 'issue' && item.parentId) {
+    const parent = sourceData.nodes.find((n) => n.id === item.parentId)
+    if (parent) chips.push(headChip(`parent: #${parent.issue.number} ${parent.issue.title}`, parent.issue.url))
+  }
+  if (node.kind === 'pullRequest') {
+    chips.push(headChip(`${item.baseRefName} ← ${item.headRefName}`, null, 'base ← head'))
+  }
+  for (const reason of item.reasons || []) chips.push(headChip(reason))
+  document.getElementById('drawer-chips').innerHTML = chips.join('')
+
+  document.getElementById('drawer-side').innerHTML = factsHTML(node) + relationsHTML(node)
+  paintDataStyles(document.getElementById('drawer-side'))
+
+  const markdown = document.getElementById('drawer-markdown')
+  const cached = bodies.get(nodeID)
+  const paint = (detail) => `<div class="rendered">${detail.bodyHtml || '<p class="side-plain">No description provided.</p>'}</div>${commentsHTML(detail)}`
+  markdown.innerHTML = cached === undefined ? '<p class="side-plain">Loading…</p>' : paint(cached)
+
+  copyButton.classList.remove('is-copied')
+  drawer.hidden = false
+  scrim.hidden = false
+  // Two frames: the element has to be laid out at translateX(100%) before the
+  // class that moves it to 0 can be a transition rather than a jump.
+  requestAnimationFrame(() => requestAnimationFrame(() => drawer.classList.add('is-open')))
+
+  if (cached !== undefined) return
+  try {
+    // The board's node ids carry an `issue:` / `pr:` prefix so the two kinds
+    // cannot collide; GitHub knows nothing about that, so it is asked with the
+    // item's own id.
+    const response = await fetch(`/api/v1/detail?id=${encodeURIComponent(item.id)}`)
+    const payload = await response.json()
+    if (response.ok) bodies.set(nodeID, payload)
+    const html = response.ok
+      ? paint(payload)
+      : `<p class="side-plain">Could not load the body: ${escapeHTML(payload.error || response.status)}</p>`
+    // Somebody may have opened another card while this was in flight.
+    if (openNodeID === nodeID) markdown.innerHTML = html
+  } catch (error) {
+    if (openNodeID === nodeID) {
+      markdown.innerHTML = `<p class="side-plain">Could not load the body: ${escapeHTML(String(error))}</p>`
+    }
+  }
+}
+
+// Copying the GitHub link, not this page's: a board served on 127.0.0.1 opens
+// on nobody else's machine, and what gets pasted into a message has to.
+const copyButton = document.getElementById('drawer-copy')
+let copiedFor = null
+copyButton.addEventListener('click', async () => {
+  if (!openURL) return
+  try {
+    await navigator.clipboard.writeText(openURL)
+  } catch {
+    // Denied, or an older browser. Fall back to the one thing that has always
+    // worked: a selection and the copy command.
+    const carrier = document.createElement('textarea')
+    carrier.value = openURL
+    carrier.setAttribute('readonly', '')
+    carrier.className = 'offscreen'
+    document.body.appendChild(carrier)
+    carrier.select()
+    try {
+      document.execCommand('copy')
+    } catch {
+      // Nothing left to try; the link is still on screen as the number's href.
+      return
+    } finally {
+      carrier.remove()
+    }
+  }
+  copyButton.classList.add('is-copied')
+  clearTimeout(copiedFor)
+  copiedFor = setTimeout(() => copyButton.classList.remove('is-copied'), 1400)
+})
+
+document.getElementById('drawer-close').addEventListener('click', closeDrawer)
+scrim.addEventListener('click', closeDrawer)
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !drawer.hidden) closeDrawer()
+})
+
 // ------------------------------------------------------------------- behaviour
 
 lanesEl.addEventListener('click', (event) => {
@@ -1300,15 +1549,17 @@ lanesEl.addEventListener('click', (event) => {
   }
 
   const toggle = event.target.closest('[data-toggle]')
-  if (!toggle) return
-  event.preventDefault()
-  const id = toggle.dataset.toggle
-  if (collapsed.has(id)) collapsed.delete(id)
-  else collapsed.add(id)
-  storeCards()
-  // Hold the issue you clicked still; the pull requests appear beneath it.
-  anchorHint = id
-  if (sourceData) render(sourceData)
+  if (toggle) {
+    event.preventDefault()
+    const id = toggle.dataset.toggle
+    if (collapsed.has(id)) collapsed.delete(id)
+    else collapsed.add(id)
+    storeCards()
+    // Hold the issue you clicked still; the pull requests appear beneath it.
+    anchorHint = id
+    if (sourceData) render(sourceData)
+    return
+  }
 })
 
 lanesEl.addEventListener('pointerover', (event) => {
@@ -1386,8 +1637,13 @@ const DRAG_SLOP = 4
 // otherwise retarget the click to the viewport, and the control would never see
 // it — which is exactly how the repository card stopped folding.
 const NOT_DRAGGABLE = 'a, button, input, label, select, [data-fold], [data-toggle]'
+// What the pointer went down on. The capture below retargets the click that
+// follows to the viewport, so by the time a click arrives the card it started
+// on is no longer in the event — this is the only record of it.
+let pressedOn = null
 viewport.addEventListener('pointerdown', (event) => {
   dragMoved = false
+  pressedOn = event.target
   if (event.target.closest(NOT_DRAGGABLE)) return
   dragging = { x: event.clientX, y: event.clientY, left: viewport.scrollLeft, top: viewport.scrollTop }
   viewport.classList.add('grabbing')
@@ -1409,8 +1665,23 @@ const endDrag = () => {
   dragging = null
   viewport.classList.remove('grabbing')
 }
-viewport.addEventListener('pointerup', endDrag)
-viewport.addEventListener('pointercancel', endDrag)
+viewport.addEventListener('pointerup', (event) => {
+  const target = pressedOn
+  pressedOn = null
+  endDrag()
+  // A pan that ended on a card is not a click on it, and every control has its
+  // own handler on #lanes — those clicks never reach here because a control is
+  // NOT_DRAGGABLE and so was never captured.
+  if (dragMoved || !target || !target.closest) return
+  if (target.closest(`${NOT_DRAGGABLE}, [data-tuck], [data-toggle-subs]`)) return
+  const card = target.closest('.node')
+  if (card) openDrawer(card.dataset.id)
+  void event
+})
+viewport.addEventListener('pointercancel', () => {
+  pressedOn = null
+  endDrag()
+})
 
 fetch('/api/v1/meta')
   .then((response) => response.json())

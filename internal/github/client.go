@@ -987,6 +987,117 @@ func (c *Client) loadPullRequests(ctx context.Context, options graph.SearchOptio
 	return kept, warnings, nil
 }
 
+// The drawer's query. Written out whole rather than assembled from pieces, so
+// a test can read exactly what GitHub is asked for — including what it is not
+// asked for. Line comments would multiply the node count by ten for a level of
+// detail the panel does not show.
+const detailQuery = `query($id:ID!){node(id:$id){
+  __typename
+  ...on Issue{
+    bodyHTML
+    comments(last:20){totalCount nodes{author{login avatarUrl} bodyHTML createdAt url}}
+  }
+  ...on PullRequest{
+    bodyHTML
+    comments(last:20){totalCount nodes{author{login avatarUrl} bodyHTML createdAt url}}
+    reviews(last:20){nodes{author{login avatarUrl} state bodyHTML createdAt url}}
+  }
+}}`
+
+// commentTail is how far back the drawer reads, and matches the `last:` above.
+// The recent exchange is what says whether something is stuck; the opening of a
+// long thread is usually the body, which is fetched in full anyway.
+const commentTail = 20
+
+// Detail fetches one node's rendered body and the tail of its conversation.
+// GitHub does the Markdown, which is why this module needs no renderer of its
+// own and the page needs no library.
+//
+// One node, one call, and only when somebody opens a card. Asking for bodies
+// during the scan would carry the text of every pull request in every
+// repository across the wire for the sake of the one that gets read.
+func (c *Client) Detail(ctx context.Context, id string) (graph.Detail, error) {
+	type rawComment struct {
+		Author *struct {
+			Login     string `json:"login"`
+			AvatarURL string `json:"avatarUrl"`
+		} `json:"author"`
+		BodyHTML  string    `json:"bodyHTML"`
+		CreatedAt time.Time `json:"createdAt"`
+		URL       string    `json:"url"`
+		State     string    `json:"state"`
+	}
+	var payload struct {
+		Data struct {
+			Node *struct {
+				Typename string `json:"__typename"`
+				BodyHTML string `json:"bodyHTML"`
+				Comments struct {
+					TotalCount int          `json:"totalCount"`
+					Nodes      []rawComment `json:"nodes"`
+				} `json:"comments"`
+				Reviews struct {
+					Nodes []rawComment `json:"nodes"`
+				} `json:"reviews"`
+			} `json:"node"`
+		} `json:"data"`
+	}
+	if err := c.graphql(ctx, detailQuery, map[string]string{"id": id}, &payload); err != nil {
+		return graph.Detail{}, err
+	}
+	node := payload.Data.Node
+	if node == nil {
+		return graph.Detail{}, fmt.Errorf("no issue or pull request with id %q", id)
+	}
+
+	said := make([]graph.Comment, 0, len(node.Comments.Nodes)+len(node.Reviews.Nodes))
+	total := node.Comments.TotalCount
+	keep := func(raw rawComment, state string) {
+		// A review with no words is an approval and nothing else. It is already
+		// counted on the card; repeating it here would bury the ones that speak.
+		if strings.TrimSpace(raw.BodyHTML) == "" {
+			return
+		}
+		if state != "" {
+			total++
+		}
+		who := graph.User{}
+		if raw.Author != nil {
+			who = graph.User{Login: raw.Author.Login, AvatarURL: raw.Author.AvatarURL}
+		}
+		said = append(said, graph.Comment{
+			Author: who, BodyHTML: raw.BodyHTML, CreatedAt: raw.CreatedAt,
+			URL: raw.URL, ReviewState: state,
+		})
+	}
+	for _, raw := range node.Comments.Nodes {
+		keep(raw, "")
+	}
+	for _, raw := range node.Reviews.Nodes {
+		keep(raw, raw.State)
+	}
+
+	return graph.Detail{
+		ID: id, BodyHTML: node.BodyHTML,
+		Comments:     tailOfConversation(said),
+		CommentTotal: total,
+	}, nil
+}
+
+// tailOfConversation sorts by when things were said and keeps the last page of
+// them. The two connections arrive separately and interleave in time, so they
+// have to be merged before anything can be cut.
+func tailOfConversation(said []graph.Comment) []graph.Comment {
+	sort.SliceStable(said, func(i, j int) bool { return said[i].CreatedAt.Before(said[j].CreatedAt) })
+	if len(said) > commentTail {
+		said = said[len(said)-commentTail:]
+	}
+	if len(said) == 0 {
+		return nil
+	}
+	return said
+}
+
 // reviewVoice is one row of either review connection, flattened so the two can
 // be merged without caring which one it came from.
 type reviewVoice struct {

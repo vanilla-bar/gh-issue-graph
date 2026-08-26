@@ -38,6 +38,13 @@ type Loader interface {
 	Load(ctx context.Context, options graph.SearchOptions, progress github.Progress) (graph.Input, error)
 }
 
+// Detailer is a loader that can also fetch one node's body. It is separate from
+// Loader, and optional: a loader that cannot do it simply says so, and the
+// drawer stays shut rather than the whole board failing to build.
+type Detailer interface {
+	Detail(ctx context.Context, id string) (graph.Detail, error)
+}
+
 // Server owns the listener and the loader.
 type Server struct {
 	Loader  Loader
@@ -107,6 +114,7 @@ func (s *Server) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/graph", s.handleGraph)
 	mux.HandleFunc("/api/v1/meta", s.handleMeta)
+	mux.HandleFunc("/api/v1/detail", s.handleDetail)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	mux.Handle("/", http.FileServer(http.FS(web)))
 	return securityHeaders(mux)
@@ -121,6 +129,31 @@ func securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		next.ServeHTTP(w, r)
 	})
+}
+
+// handleDetail answers with one node's body, fetched on demand. The board is
+// built without any bodies at all — a hundred of them would be a hundred times
+// the payload for text nobody has asked to read yet.
+func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
+	detailer, ok := s.Loader.(Detailer)
+	if !ok {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "this loader cannot fetch bodies"})
+		return
+	}
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
+		return
+	}
+	// Not behind s.mu: this is a single node, and holding the refresh lock for
+	// it would let opening a card stall behind a full reload of the board.
+	detail, err := detailer.Detail(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, detail)
 }
 
 func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {

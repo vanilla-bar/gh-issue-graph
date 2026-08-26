@@ -237,6 +237,12 @@ def main():
         ws = WS(endpoint)
         ws.call("Page.enable")
         ws.call("Runtime.enable")
+        # The drawer's copy button writes to the clipboard, and headless Chrome
+        # denies that by default.
+        ws.call("Browser.grantPermissions", {
+            "origin": f"http://127.0.0.1:{SERVER_PORT}",
+            "permissions": ["clipboardReadWrite", "clipboardSanitizedWrite"],
+        })
 
         # Folds are persisted, so a previous run would otherwise start this one
         # with lanes already collapsed.
@@ -798,6 +804,205 @@ def main():
                   after_unfold["prs"] == 0 and after_unfold["subs"] == 0, json.dumps(after_unfold))
             check("but leaves a tucked card tucked — that is a different decision",
                   after_unfold["tucked"] == 1, json.dumps(after_unfold))
+
+        # The reading panel. A card's body is not on the board — it is fetched
+        # when somebody opens it — so this is the one part of the UI that talks
+        # to the server after the first load.
+        # Bring the card into view before measuring it: by this point the board
+        # has been panned, folded and reloaded, and a click at a coordinate off
+        # the screen lands on nothing.
+        def card_point(number):
+            return ws.evaluate("""(() => {
+              const card = [...document.querySelectorAll('#lanes .node')]
+                .find((n) => n.querySelector('.number').textContent.trim() === %s)
+              if (!card) return null
+              card.scrollIntoView({ block: 'center', inline: 'center' })
+              const reasons = card.querySelector('.reasons')
+              const r = (reasons || card).getBoundingClientRect()
+              if (r.top < 140 || r.bottom > window.innerHeight - 140) return null
+              return { x: r.left + r.width - 24, y: r.top + r.height / 2, id: card.dataset.id }
+            })()""" % json.dumps(number))
+
+        def drawer_state():
+            return ws.evaluate("""(() => {
+              const el = document.getElementById('drawer')
+              const scrim = document.getElementById('scrim')
+              return {
+                shown: !el.hidden, open: el.classList.contains('is-open'),
+                title: document.getElementById('drawer-title').textContent,
+                number: document.getElementById('drawer-number').textContent,
+                body: document.getElementById('drawer-markdown').textContent.trim().slice(0, 40),
+                headings: [...document.querySelectorAll('#drawer-markdown h1, #drawer-markdown h2')]
+                  .map((h) => h.textContent),
+                side: [...document.querySelectorAll('#drawer-side .side-block h3')].map((h) => h.textContent),
+                scrimShown: !scrim.hidden,
+                comments: [...document.querySelectorAll('.comment')].map((c) => ({
+                  who: (c.querySelector('.login') || {}).textContent,
+                  said: (c.querySelector('.said') || {}).textContent || null,
+                  when: (c.querySelector('.when') || {}).textContent,
+                  body: (c.querySelector('.rendered') || {}).textContent.trim().slice(0, 30),
+                })),
+                more: (document.querySelector('.more-said') || {}).textContent || null,
+                reviewers: [...document.querySelectorAll('.reviewers-list li')].map((li) => ({
+                  login: li.querySelector('.login').textContent,
+                  said: li.querySelector('.said').textContent,
+                })),
+                // The state pill, the number and the repository belong on one
+                // row. `PR #210` wrapping was the header pretending it was
+                // short of room in a panel 880px wide.
+                headRow: (() => {
+                  const tops = ['drawer-state', 'drawer-number', 'drawer-repo']
+                    .map((id) => document.getElementById(id))
+                    .filter((el) => el && el.textContent.trim())
+                    .map((el) => Math.round(el.getBoundingClientRect().top))
+                  return { tops, spread: tops.length ? Math.max(...tops) - Math.min(...tops) : 0 }
+                })(),
+                repoShown: Math.round(document.getElementById('drawer-repo').getBoundingClientRect().width),
+              }
+            })()""")
+
+        ws.evaluate("window.__fetches = []; (() => { const real = window.fetch;"
+                    " window.fetch = (...args) => { window.__fetches.push(String(args[0])); return real(...args) } })()")
+
+        # The tuck checks above left #120 folded into a line, and a tucked card
+        # takes its pull requests off the board with it. Open it back up, or
+        # there is no pull request here to read.
+        ws.evaluate("for (const t of document.querySelectorAll('.node.tucked .tuck')) t.click()")
+        time.sleep(0.8)
+        check("the board is whole again before the drawer is tried",
+              ws.evaluate("document.querySelectorAll('.node.tucked').length") == 0,
+              f"{ws.evaluate('document.querySelectorAll(\'.node.tucked\').length')} still tucked")
+
+        point = card_point("#100")
+        check("a card with a body to read is on the board", bool(point), json.dumps(point))
+        if point:
+            click(ws, point["x"], point["y"], settle=1.4)
+            opened = drawer_state()
+            check("clicking the blank of a card opens the drawer",
+                  opened["shown"] and opened["open"], json.dumps(opened))
+            check("it carries the title and the number",
+                  opened["number"] == "#100" and "recipe data model" in opened["title"],
+                  json.dumps({"number": opened["number"], "title": opened["title"]}))
+            check("the body arrives from the server, rendered",
+                  len(opened["headings"]) > 0, json.dumps(opened["headings"]))
+            check("the relations are listed beside it", "Sub-issues" in opened["side"],
+                  json.dumps(opened["side"]))
+            # `PR #210` split over two lines was the header claiming to be short
+            # of room in a panel 880px wide.
+            check("the state, the number and the repository sit on one row",
+                  len(opened["headRow"]["tops"]) == 3 and opened["headRow"]["spread"] < 6,
+                  json.dumps(opened["headRow"]))
+            check("the repository name is not squeezed to nothing",
+                  opened["repoShown"] > 20, f"{opened['repoShown']}px wide")
+
+            # Esc, the close button and the scrim all have to work: a panel that
+            # covers the board with only one way out is a trap.
+            ws.call("Input.dispatchKeyEvent", {"type": "keyDown", "key": "Escape", "code": "Escape",
+                                               "windowsVirtualKeyCode": 27})
+            ws.call("Input.dispatchKeyEvent", {"type": "keyUp", "key": "Escape", "code": "Escape",
+                                               "windowsVirtualKeyCode": 27})
+            time.sleep(0.4)
+            check("Escape closes it", not drawer_state()["shown"] and not drawer_state()["scrimShown"],
+                  json.dumps(drawer_state()))
+
+            click(ws, point["x"], point["y"], settle=1.0)
+            close = centre(ws, "#drawer-close")
+            click(ws, close["x"], close["y"], settle=0.5)
+            check("the close button closes it", not drawer_state()["shown"])
+
+            click(ws, point["x"], point["y"], settle=1.0)
+            click(ws, 60, 620, settle=0.5)   # the scrim, well left of the panel
+            check("clicking the scrim closes it", not drawer_state()["shown"])
+
+            # Opening the same card again must not ask the server twice.
+            before = ws.evaluate("window.__fetches.filter((u) => u.includes('/api/v1/detail')).length")
+            click(ws, point["x"], point["y"], settle=1.2)
+            after = ws.evaluate("window.__fetches.filter((u) => u.includes('/api/v1/detail')).length")
+            check("a body already read is not fetched again", after == before,
+                  f"{before} -> {after} request(s)")
+            check("and it is still there on the second open",
+                  len(drawer_state()["headings"]) > 0, json.dumps(drawer_state()["headings"]))
+            ws.evaluate("document.getElementById('drawer-close').click()")
+            time.sleep(0.4)
+
+        # A pull request opens the same way, and says what it implements.
+        pr_point = card_point("PR #210")
+        if pr_point:
+            click(ws, pr_point["x"], pr_point["y"], settle=1.4)
+            pr_open = drawer_state()
+            check("a pull request opens the drawer too",
+                  pr_open["shown"] and pr_open["number"] == "PR #210", json.dumps(pr_open))
+            check("and lists the issue it implements", "Implements" in pr_open["side"],
+                  json.dumps(pr_open["side"]))
+
+            # Who is looking at it, and what they said. The card has the same
+            # people as rings on avatars; here they are named.
+            check("the reviewers are named beside the body",
+                  [r["login"] for r in pr_open["reviewers"]] == ["hubot", "mona"],
+                  json.dumps(pr_open["reviewers"]))
+            check("each one says where they stand",
+                  [r["said"] for r in pr_open["reviewers"]] == ["review requested", "approved"],
+                  json.dumps([r["said"] for r in pr_open["reviewers"]]))
+            check("the heading carries the approval count",
+                  any(h.startswith("Reviewers") and "1/2" in h for h in pr_open["side"]),
+                  json.dumps(pr_open["side"]))
+
+            # The conversation, oldest first, with reviews wearing their state.
+            check("the conversation is under the body", len(pr_open["comments"]) == 3,
+                  json.dumps(pr_open["comments"]))
+            check("it runs oldest first",
+                  [c["who"] for c in pr_open["comments"]] == ["mona", "octocat", "mona"],
+                  json.dumps([c["who"] for c in pr_open["comments"]]))
+            check("a review says what it decided",
+                  [c["said"] for c in pr_open["comments"]] == ["requested changes", None, "approved"],
+                  json.dumps([c["said"] for c in pr_open["comments"]]))
+            # A thread cut short without saying so reads as the whole thing.
+            check("what was left out is admitted to",
+                  pr_open["more"] is not None and "4 earlier" in pr_open["more"],
+                  str(pr_open["more"]))
+
+            # The link that gets pasted into a message has to be the one that
+            # opens on somebody else's machine, which a board on 127.0.0.1
+            # never will.
+            check("the copy button says nothing until it is pressed",
+                  ws.evaluate("getComputedStyle(document.querySelector('#drawer-copy .said')).opacity") == "0")
+            copy = centre(ws, "#drawer-copy")
+            click(ws, copy["x"], copy["y"], settle=0.6)
+            copied = ws.evaluate("""(async () => ({
+              said: getComputedStyle(document.querySelector('#drawer-copy .said')).opacity,
+              clipboard: await navigator.clipboard.readText().catch((e) => 'ERR ' + e),
+            }))()""")
+            check("it copies the GitHub link, not this page's",
+                  copied["clipboard"].startswith("https://github.com/")
+                  and copied["clipboard"].endswith("/pull/210"),
+                  json.dumps(copied["clipboard"]))
+            check("and says so", copied["said"] == "1", json.dumps(copied))
+
+            ws.evaluate("document.getElementById('drawer-close').click()")
+            time.sleep(0.4)
+
+        # An issue nobody has commented on drops the section rather than
+        # showing an empty heading.
+        quiet = card_point("#110")
+        if quiet:
+            click(ws, quiet["x"], quiet["y"], settle=1.2)
+            check("opening another card clears the copied mark",
+                  not ws.evaluate("document.getElementById('drawer-copy').classList.contains('is-copied')"))
+            silent = drawer_state()
+            check("a card with no conversation shows no conversation",
+                  len(silent["comments"]) == 0 and silent["more"] is None,
+                  json.dumps({"comments": silent["comments"], "more": silent["more"]}))
+            ws.evaluate("document.getElementById('drawer-close').click()")
+            time.sleep(0.4)
+
+        # The controls on a card keep their own meaning: pressing one must not
+        # also open the panel behind it.
+        fold = centre(ws, ".node:not(.tucked) [data-toggle]")
+        if fold:
+            click(ws, fold["x"], fold["y"], settle=0.6)
+            check("a fold button does not open the drawer", not drawer_state()["shown"],
+                  json.dumps(drawer_state()))
+            click(ws, fold["x"], fold["y"], settle=0.6)   # put it back
 
         check("no javascript errors", not ws.evaluate("(window.__errors || []).length"))
 
