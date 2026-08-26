@@ -995,10 +995,12 @@ const detailQuery = `query($id:ID!){node(id:$id){
   __typename
   ...on Issue{
     bodyHTML
+    createdAt
     comments(last:20){totalCount nodes{author{login avatarUrl} bodyHTML createdAt url}}
   }
   ...on PullRequest{
     bodyHTML
+    createdAt
     comments(last:20){totalCount nodes{author{login avatarUrl} bodyHTML createdAt url}}
     reviews(last:20){nodes{author{login avatarUrl} state bodyHTML createdAt url}}
   }
@@ -1030,9 +1032,10 @@ func (c *Client) Detail(ctx context.Context, id string) (graph.Detail, error) {
 	var payload struct {
 		Data struct {
 			Node *struct {
-				Typename string `json:"__typename"`
-				BodyHTML string `json:"bodyHTML"`
-				Comments struct {
+				Typename  string    `json:"__typename"`
+				BodyHTML  string    `json:"bodyHTML"`
+				CreatedAt time.Time `json:"createdAt"`
+				Comments  struct {
 					TotalCount int          `json:"totalCount"`
 					Nodes      []rawComment `json:"nodes"`
 				} `json:"comments"`
@@ -1078,7 +1081,7 @@ func (c *Client) Detail(ctx context.Context, id string) (graph.Detail, error) {
 	}
 
 	return graph.Detail{
-		ID: id, BodyHTML: node.BodyHTML,
+		ID: id, BodyHTML: node.BodyHTML, CreatedAt: node.CreatedAt,
 		Comments:     tailOfConversation(said),
 		CommentTotal: total,
 	}, nil

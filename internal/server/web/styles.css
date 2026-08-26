@@ -1602,6 +1602,12 @@ a.drawer-chip:hover { border-color: var(--border-2); color: var(--fg-2); }
 .comment .said.bad { background: var(--red-soft); color: var(--red); }
 .comment .said.warn { background: var(--amber-soft); color: var(--amber); }
 .comment .when { margin-left: auto; color: var(--fg-4); }
+/* "opened this issue" — quiet, because the name beside it is the part that is
+   being read. */
+.comment .opened { color: var(--fg-4); }
+/* The body's own card. Same frame as a comment; nothing else sets it apart,
+   because it is not a different kind of thing. */
+.comment.is-body { margin-bottom: 14px; }
 
 .comment .rendered {
   padding: 12px;

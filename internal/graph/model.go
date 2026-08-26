@@ -45,6 +45,10 @@ type Reviewer struct {
 type Detail struct {
 	ID       string `json:"id"`
 	BodyHTML string `json:"bodyHtml"`
+	// CreatedAt is when it was opened. The board carries updatedAt, which is a
+	// different question: the drawer's first card is what somebody wrote, and
+	// it is dated by when they wrote it.
+	CreatedAt time.Time `json:"createdAt"`
 	// Comments is the tail of the conversation, oldest first. Reviews that
 	// carry no words of their own are left out: an approval with nothing said
 	// is already on the card as part of the count.

@@ -836,7 +836,7 @@ def main():
                   .map((h) => h.textContent),
                 side: [...document.querySelectorAll('#drawer-side .side-block h3')].map((h) => h.textContent),
                 scrimShown: !scrim.hidden,
-                comments: [...document.querySelectorAll('.comment')].map((c) => ({
+                comments: [...document.querySelectorAll('.conversation .comment')].map((c) => ({
                   who: (c.querySelector('.login') || {}).textContent,
                   said: (c.querySelector('.said') || {}).textContent || null,
                   when: (c.querySelector('.when') || {}).textContent,
@@ -991,6 +991,30 @@ def main():
             check("its header is set off from the body it introduces",
                   all(r["headBorder"] >= 1 and r["headTinted"] for r in frames["rows"]),
                   json.dumps(frames["rows"]))
+            # The body is the first thing somebody wrote, so it wears the same
+            # frame. Left bare it read as a loose paragraph above a list of
+            # framed replies.
+            body_card = ws.evaluate("""(() => {
+              const el = document.querySelector('.comment.is-body')
+              if (!el) return null
+              const cs = getComputedStyle(el)
+              const head = el.querySelector('header')
+              return {
+                border: parseFloat(cs.borderTopWidth),
+                inConversation: !!el.closest('.conversation'),
+                who: (head.querySelector('.login') || {}).textContent,
+                opened: (head.querySelector('.opened') || {}).textContent,
+                when: (head.querySelector('.when') || {}).textContent,
+              }
+            })()""")
+            check("the body is drawn in the same frame as a comment",
+                  body_card and body_card["border"] >= 1 and not body_card["inConversation"],
+                  json.dumps(body_card))
+            check("and its header says who opened it, and when",
+                  body_card and body_card["who"] and "opened this" in (body_card["opened"] or "")
+                  and (body_card["when"] or "").strip() != "",
+                  json.dumps(body_card))
+
             check("a heading inside a comment is not dressed as a section label",
                   frames["innerTransform"] == "none"
                   and frames["sectionTransform"] == "uppercase"

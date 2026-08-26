@@ -43,7 +43,15 @@ func (l *Loader) Detail(ctx context.Context, id string) (graph.Detail, error) {
 		body = "<p><em>No description provided.</em></p>"
 	}
 	said := demoComments(l.started, id)
-	return graph.Detail{ID: id, BodyHTML: body, Comments: said, CommentTotal: demoTotals(id, len(said))}, nil
+	// Opened before anything was said about it.
+	opened := l.started.Add(-30 * time.Hour)
+	if len(said) > 0 {
+		opened = said[0].CreatedAt.Add(-time.Hour)
+	}
+	return graph.Detail{
+		ID: id, BodyHTML: body, CreatedAt: opened,
+		Comments: said, CommentTotal: demoTotals(id, len(said)),
+	}, nil
 }
 
 // demoComments covers what the panel has to lay out: an ordinary comment, a
