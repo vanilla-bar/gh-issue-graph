@@ -197,8 +197,7 @@ func prsByIssue(prs map[string]*PullRequest) map[string][]*PullRequest {
 //
 // The default branch is excluded on both sides. A release pull request whose
 // head is `dev` would otherwise adopt every pull request opened against `dev`,
-// which is how a repository with one release PR ends up looking like a single
-// forty-deep stack.
+// turning a repository with one release PR into a single very deep stack.
 func prStackParents(list []*PullRequest, repos map[string]*Repository) map[string]*PullRequest {
 	isDefault := func(repositoryID, ref string) bool {
 		repo := repos[repositoryID]
