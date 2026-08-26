@@ -987,6 +987,36 @@ func (c *Client) loadPullRequests(ctx context.Context, options graph.SearchOptio
 	return kept, warnings, nil
 }
 
+// Detail fetches one node's rendered body. GitHub does the Markdown, which is
+// why this module needs no renderer of its own and the page needs no library.
+//
+// One node, one call, and only when somebody opens a card. Asking for bodies
+// during the scan would carry the text of every pull request in every
+// repository across the wire for the sake of the one that gets read.
+func (c *Client) Detail(ctx context.Context, id string) (graph.Detail, error) {
+	const query = `query($id:ID!){node(id:$id){
+	  __typename
+	  ...on Issue{bodyHTML}
+	  ...on PullRequest{bodyHTML}
+	}}`
+
+	var payload struct {
+		Data struct {
+			Node *struct {
+				Typename string `json:"__typename"`
+				BodyHTML string `json:"bodyHTML"`
+			} `json:"node"`
+		} `json:"data"`
+	}
+	if err := c.graphql(ctx, query, map[string]string{"id": id}, &payload); err != nil {
+		return graph.Detail{}, err
+	}
+	if payload.Data.Node == nil {
+		return graph.Detail{}, fmt.Errorf("no issue or pull request with id %q", id)
+	}
+	return graph.Detail{ID: id, BodyHTML: payload.Data.Node.BodyHTML}, nil
+}
+
 // reviewVoice is one row of either review connection, flattened so the two can
 // be merged without caring which one it came from.
 type reviewVoice struct {

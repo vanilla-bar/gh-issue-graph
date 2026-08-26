@@ -35,6 +35,18 @@ type Reviewer struct {
 	IsTeam bool `json:"isTeam,omitempty"`
 }
 
+// Detail is what a card cannot hold: the body of an issue or a pull request,
+// fetched only when somebody asks to read it.
+//
+// BodyHTML is GitHub's own rendering, which is why this module needs no Markdown
+// library. It is dropped into the page as HTML, so the server's CSP is what
+// stands between it and anything unwanted: script-src 'self' means nothing in it
+// can execute.
+type Detail struct {
+	ID       string `json:"id"`
+	BodyHTML string `json:"bodyHtml"`
+}
+
 // Label is a GitHub issue label.
 type Label struct {
 	Name  string `json:"name"`

@@ -799,6 +799,122 @@ def main():
             check("but leaves a tucked card tucked — that is a different decision",
                   after_unfold["tucked"] == 1, json.dumps(after_unfold))
 
+        # The reading panel. A card's body is not on the board — it is fetched
+        # when somebody opens it — so this is the one part of the UI that talks
+        # to the server after the first load.
+        def card_point(number):
+            return ws.evaluate("""(() => {
+              const card = [...document.querySelectorAll('#lanes .node')]
+                .find((n) => n.querySelector('.number').textContent.trim() === %s)
+              if (!card) return null
+              const reasons = card.querySelector('.reasons')
+              const r = (reasons || card).getBoundingClientRect()
+              return { x: r.left + r.width - 24, y: r.top + r.height / 2, id: card.dataset.id }
+            })()""" % json.dumps(number))
+
+        def drawer_state():
+            return ws.evaluate("""(() => {
+              const el = document.getElementById('drawer')
+              const scrim = document.getElementById('scrim')
+              return {
+                shown: !el.hidden, open: el.classList.contains('is-open'),
+                title: document.getElementById('drawer-title').textContent,
+                number: document.getElementById('drawer-number').textContent,
+                body: document.getElementById('drawer-markdown').textContent.trim().slice(0, 40),
+                headings: [...document.querySelectorAll('#drawer-markdown h1, #drawer-markdown h2')]
+                  .map((h) => h.textContent),
+                side: [...document.querySelectorAll('#drawer-side .side-block h3')].map((h) => h.textContent),
+                scrimShown: !scrim.hidden,
+                // The state pill, the number and the repository belong on one
+                // row. `PR #210` wrapping was the header pretending it was
+                // short of room in a panel 880px wide.
+                headRow: (() => {
+                  const tops = ['drawer-state', 'drawer-number', 'drawer-repo']
+                    .map((id) => document.getElementById(id))
+                    .filter((el) => el && el.textContent.trim())
+                    .map((el) => Math.round(el.getBoundingClientRect().top))
+                  return { tops, spread: tops.length ? Math.max(...tops) - Math.min(...tops) : 0 }
+                })(),
+                repoShown: Math.round(document.getElementById('drawer-repo').getBoundingClientRect().width),
+              }
+            })()""")
+
+        ws.evaluate("window.__fetches = []; (() => { const real = window.fetch;"
+                    " window.fetch = (...args) => { window.__fetches.push(String(args[0])); return real(...args) } })()")
+
+        point = card_point("#100")
+        check("a card with a body to read is on the board", bool(point), json.dumps(point))
+        if point:
+            click(ws, point["x"], point["y"], settle=1.4)
+            opened = drawer_state()
+            check("clicking the blank of a card opens the drawer",
+                  opened["shown"] and opened["open"], json.dumps(opened))
+            check("it carries the title and the number",
+                  opened["number"] == "#100" and "recipe data model" in opened["title"],
+                  json.dumps({"number": opened["number"], "title": opened["title"]}))
+            check("the body arrives from the server, rendered",
+                  len(opened["headings"]) > 0, json.dumps(opened["headings"]))
+            check("the relations are listed beside it", "Sub-issues" in opened["side"],
+                  json.dumps(opened["side"]))
+            # `PR #210` split over two lines was the header claiming to be short
+            # of room in a panel 880px wide.
+            check("the state, the number and the repository sit on one row",
+                  len(opened["headRow"]["tops"]) == 3 and opened["headRow"]["spread"] < 6,
+                  json.dumps(opened["headRow"]))
+            check("the repository name is not squeezed to nothing",
+                  opened["repoShown"] > 20, f"{opened['repoShown']}px wide")
+
+            # Esc, the close button and the scrim all have to work: a panel that
+            # covers the board with only one way out is a trap.
+            ws.call("Input.dispatchKeyEvent", {"type": "keyDown", "key": "Escape", "code": "Escape",
+                                               "windowsVirtualKeyCode": 27})
+            ws.call("Input.dispatchKeyEvent", {"type": "keyUp", "key": "Escape", "code": "Escape",
+                                               "windowsVirtualKeyCode": 27})
+            time.sleep(0.4)
+            check("Escape closes it", not drawer_state()["shown"] and not drawer_state()["scrimShown"],
+                  json.dumps(drawer_state()))
+
+            click(ws, point["x"], point["y"], settle=1.0)
+            close = centre(ws, "#drawer-close")
+            click(ws, close["x"], close["y"], settle=0.5)
+            check("the close button closes it", not drawer_state()["shown"])
+
+            click(ws, point["x"], point["y"], settle=1.0)
+            click(ws, 60, 620, settle=0.5)   # the scrim, well left of the panel
+            check("clicking the scrim closes it", not drawer_state()["shown"])
+
+            # Opening the same card again must not ask the server twice.
+            before = ws.evaluate("window.__fetches.filter((u) => u.includes('/api/v1/detail')).length")
+            click(ws, point["x"], point["y"], settle=1.2)
+            after = ws.evaluate("window.__fetches.filter((u) => u.includes('/api/v1/detail')).length")
+            check("a body already read is not fetched again", after == before,
+                  f"{before} -> {after} request(s)")
+            check("and it is still there on the second open",
+                  len(drawer_state()["headings"]) > 0, json.dumps(drawer_state()["headings"]))
+            ws.evaluate("document.getElementById('drawer-close').click()")
+            time.sleep(0.4)
+
+        # A pull request opens the same way, and says what it implements.
+        pr_point = card_point("PR #210")
+        if pr_point:
+            click(ws, pr_point["x"], pr_point["y"], settle=1.4)
+            pr_open = drawer_state()
+            check("a pull request opens the drawer too",
+                  pr_open["shown"] and pr_open["number"] == "PR #210", json.dumps(pr_open))
+            check("and lists the issue it implements", "Implements" in pr_open["side"],
+                  json.dumps(pr_open["side"]))
+            ws.evaluate("document.getElementById('drawer-close').click()")
+            time.sleep(0.4)
+
+        # The controls on a card keep their own meaning: pressing one must not
+        # also open the panel behind it.
+        fold = centre(ws, ".node:not(.tucked) [data-toggle]")
+        if fold:
+            click(ws, fold["x"], fold["y"], settle=0.6)
+            check("a fold button does not open the drawer", not drawer_state()["shown"],
+                  json.dumps(drawer_state()))
+            click(ws, fold["x"], fold["y"], settle=0.6)   # put it back
+
         check("no javascript errors", not ws.evaluate("(window.__errors || []).length"))
 
         for line in checks:
