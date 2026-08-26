@@ -86,7 +86,7 @@ issue は 500 件、pull request を走査するリポジトリは 20 件、issu
 | ✓ 紫、カードが薄い | closed |
 | ⚠ `wrap up` | **締め忘れ**: sub-issue はすべて完了しているのに issue が open のまま、または pull request がマージ済みなのに閉じられていない |
 | ⊘ `1 blocker` | 他の issue を待っている |
-| `4/6` とメーター | sub-issue の進捗 |
+| `4/6` とメーター | sub-issue の進捗。キャンバスに子がいるときはボタンになり、クリックでその子孫と、ぶら下がる pull request を畳む。**デフォルトで表示** |
 | ラベルの色付きドット | GitHub 上でそのラベルに設定された色。ラベル名自体は、色が何であれ読めるコントラストを保つ |
 | PR カードの `merged` / `open` / `draft` / `closed` | 状態を、語とカード左端の色の両方で示す |
 | `👁 review requested` | GitHub が**自分**のレビューを待っている。作業内容ではなく自分に関する情報なので、他と同じく青 |

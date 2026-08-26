@@ -275,6 +275,56 @@ def main():
               len(toggles) > 0 and all(state == "true" for state in toggles),
               f"{len(toggles)} toggle(s): {sorted(set(toggles))}")
 
+        # Sub-issues fold away too, and start open for the same reason the pull
+        # requests do: you opened the repository to see what is in it.
+        sub_toggles = ws.evaluate("[...document.querySelectorAll('[data-toggle-subs]')]"
+                                  ".map((b) => b.getAttribute('aria-expanded'))")
+        check("every sub-issue toggle reads as already open",
+              len(sub_toggles) > 0 and all(state == "true" for state in sub_toggles),
+              f"{len(sub_toggles)} toggle(s): {sorted(set(sub_toggles))}")
+
+        parent = ws.evaluate("""(() => {
+          const b = document.querySelector('[data-toggle-subs]')
+          if (!b) return null
+          const r = b.getBoundingClientRect()
+          const card = b.closest('.node')
+          return {
+            x: r.left + r.width / 2, y: r.top + r.height / 2,
+            id: card.dataset.id, top: card.getBoundingClientRect().top,
+          }
+        })()""")
+        check("a parent with sub-issues on the canvas offers the fold", bool(parent),
+              json.dumps(parent))
+        if parent:
+            card_top = ("(() => { const c = [...document.querySelectorAll('#lanes .node')]"
+                        f".find((n) => n.dataset.id === {json.dumps(parent['id'])});"
+                        " return c ? c.getBoundingClientRect().top : null })()")
+            open_state = ws.evaluate(STATE)
+            click(ws, parent["x"], parent["y"], settle=0.6)
+            shut = ws.evaluate(STATE)
+            check("folding a parent takes its sub-issues away",
+                  shut["issues"] < open_state["issues"],
+                  f"{open_state['issues']} -> {shut['issues']} issue(s)")
+            check("and the pull requests that hung off them",
+                  shut["prs"] < open_state["prs"],
+                  f"{open_state['prs']} -> {shut['prs']} pull request(s)")
+            check("the toggle now reads as shut",
+                  ws.evaluate("document.querySelector('[data-toggle-subs]')"
+                              ".getAttribute('aria-expanded')") == "false")
+            # Folding must hold the card you pressed, the same way unfolding a
+            # lane does: the subtree is below it, so it has no reason to move.
+            shut_top = ws.evaluate(card_top)
+            check("the parent stays under the cursor",
+                  shut_top is not None and abs(shut_top - parent["top"]) < 2,
+                  f"{parent['top']:.0f} -> {shut_top}")
+
+            click(ws, parent["x"], parent["y"], settle=0.6)
+            back = ws.evaluate(STATE)
+            check("clicking again brings the whole subtree back",
+                  back["issues"] == open_state["issues"] and back["prs"] == open_state["prs"]
+                  and back["paths"] == open_state["paths"],
+                  f"{json.dumps(shut)} -> {json.dumps(back)}, want {json.dumps(open_state)}")
+
         # A pull request waiting on the reader's review is somebody else's pull
         # request, so no issue search returns it. The issue it references is
         # reverse-looked-up and becomes its parent, which is the whole point:

@@ -901,6 +901,12 @@ header#topbar {
   border-radius: 2px;
   background: var(--fg-4);
 }
+/* The groove and an open toggle's background are both surface-3, so inside a
+   button the meter would lose its trough and the bar would read as full. One
+   step further from the surface keeps the unfilled part visible, and holding
+   it there whether the toggle is open or shut keeps the fold from looking like
+   a change in progress. */
+button.chip.progress-chip .meter { background: var(--border-2); }
 
 .chip.progress-chip.is-done { border-color: color-mix(in srgb, var(--green) 26%, transparent); color: var(--green); }
 .chip.progress-chip.is-done .meter i { background: var(--green); }
