@@ -840,7 +840,17 @@ header#topbar {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.node.tucked .tuck { position: static; order: 2; flex: none; }
+.node.tucked .tuck { position: static; order: 3; flex: none; }
+/* What the tuck took with it. Between the title and the control, quiet enough
+   to skip when you are scanning the numbers down the column. */
+.node .carried {
+  order: 2;
+  flex: none;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-4);
+  white-space: nowrap;
+}
 .node.tucked .meta, .node.tucked .reasons { display: none; }
 
 .node .meta {

@@ -665,6 +665,7 @@ def main():
                   ws.evaluate(tuck_card)["opacity"] == "1",
                   f"opacity {ws.evaluate(tuck_card)['opacity']}")
 
+            before_tuck = ws.evaluate(STATE)
             click(ws, resting["tuckX"], resting["tuckY"], settle=0.7)
             mouse(ws, "mouseMoved", 1500, 860)
             time.sleep(0.3)
@@ -676,6 +677,45 @@ def main():
                   f"meta display: {small['meta']}")
             check("the way back stays visible on a tucked card",
                   small["opacity"] == "1", f"opacity {small['opacity']}")
+
+            # Tucking takes the subtree with it: an issue you have put aside is
+            # not one whose pull requests you still want spread across a column.
+            check("tucking takes its pull requests off the board too",
+                  ws.evaluate(STATE)["prs"] < before_tuck["prs"],
+                  f"{before_tuck['prs']} -> {ws.evaluate(STATE)['prs']} pull request(s)")
+
+            # ...and the line says what went with it, or a tucked parent reads
+            # as an issue with nothing attached.
+            check("the line says what it carried",
+                  ws.evaluate("""(() => {
+                    const card = [...document.querySelectorAll('#lanes .node.tucked')][0]
+                    const el = card && card.querySelector('.carried')
+                    return el ? el.textContent.trim() : null
+                  })()""") is not None,
+                  str(ws.evaluate("""(() => {
+                    const el = document.querySelector('.node.tucked .carried')
+                    return el ? el.textContent.trim() : null
+                  })()""")))
+
+            # A line set 16px from its neighbours reads as a scattered card
+            # rather than as an entry in a list, and gives back the space the
+            # tuck just saved.
+            gaps = ws.evaluate("""(() => {
+              const cards = [...document.querySelectorAll('#lanes .node')].map((n) => {
+                const r = n.getBoundingClientRect()
+                return { top: r.top, bottom: r.bottom, left: r.left,
+                         tucked: n.classList.contains('tucked') }
+              }).filter((c) => c.left < 400).sort((a, b) => a.top - b.top)
+              const touching = []
+              for (let i = 1; i < cards.length; i += 1) {
+                if (cards[i].tucked || cards[i - 1].tucked) {
+                  touching.push(Math.round(cards[i].top - cards[i - 1].bottom))
+                }
+              }
+              return touching
+            })()""")
+            check("a tucked card sits close to its neighbours",
+                  len(gaps) > 0 and max(gaps) < 12, f"gaps of {gaps}px")
 
             stored = ws.evaluate("localStorage.getItem('gh-issue-graph:cards')")
             check("the folds are written down", bool(stored) and "issue:" in stored, str(stored))

@@ -20,6 +20,10 @@ window.addEventListener('unhandledrejection', (event) => {
 const COLUMN_WIDTH = 290
 const COLUMN_GAP = 78
 const ROW_GAP = 16
+// Between two cards where either one is tucked. A tucked card is a line, and
+// lines set 16px apart read as scattered cards rather than as a list — the
+// space saved by tucking goes straight back into the gaps.
+const TUCKED_ROW_GAP = 6
 const LANE_GAP = 18
 
 // Breathing room between the repository frame and the graph inside it.
@@ -354,14 +358,40 @@ function visibleNodes(data) {
   // Folding a parent takes its whole subtree, not just the row beneath it:
   // leaving grandchildren behind would strand them in a column with nothing
   // pointing at them.
+  //
+  // Tucking a card does the same. An issue you have put aside is not one whose
+  // sub-issues you still want spread across the board, and a line with a full
+  // subtree still hanging off it saves no space at all.
   const hiddenIssues = new Set()
-  const walk = [...foldedSubs]
+  const walk = [...foldedSubs, ...tucked]
   while (walk.length) {
     for (const child of subIssues.get(walk.pop()) || []) {
       if (hiddenIssues.has(child)) continue
       hiddenIssues.add(child)
       walk.push(child)
     }
+  }
+
+  // What each tucked card took down with it, counted over the whole subtree
+  // rather than the row below: a parent's pull requests usually hang off its
+  // children, so counting one level would report three of the six cards that
+  // actually left the board.
+  const carried = new Map()
+  for (const root of tucked) {
+    const subtree = new Set([root])
+    const stack = [root]
+    while (stack.length) {
+      for (const child of subIssues.get(stack.pop()) || []) {
+        if (subtree.has(child)) continue
+        subtree.add(child)
+        stack.push(child)
+      }
+    }
+    const prs = new Set()
+    for (const [prID, owners] of issueOfPR) {
+      if (owners.some((id) => subtree.has(id))) prs.add(prID)
+    }
+    carried.set(root, { issues: subtree.size - 1, prs: prs.size })
   }
 
   const visible = new Set()
@@ -384,10 +414,12 @@ function visibleNodes(data) {
       if (!stackParent.has(node.id)) visible.add(node.id)
       continue
     }
-    // Shown unless every issue it belongs to has been closed up or folded away
-    // with its parent. A pull request that implements two issues stays for as
-    // long as one of them is still on the canvas and open.
-    if (owners.some((id) => !collapsed.has(id) && !hiddenIssues.has(id))) visible.add(node.id)
+    // Shown unless every issue it belongs to has been closed up, tucked away,
+    // or folded away with its parent. A pull request that implements two
+    // issues stays for as long as one of them is still on the canvas and open.
+    if (owners.some((id) => !collapsed.has(id) && !tucked.has(id) && !hiddenIssues.has(id))) {
+      visible.add(node.id)
+    }
   }
   // Stacked pull requests follow whatever they are stacked on.
   for (let pass = 0; pass < data.nodes.length; pass += 1) {
@@ -400,7 +432,7 @@ function visibleNodes(data) {
     }
     if (!changed) break
   }
-  return { visible, byID, issueOfPR, subIssues }
+  return { visible, byID, issueOfPR, subIssues, carried }
 }
 
 // ------------------------------------------------------------------- rendering
@@ -410,7 +442,7 @@ function visibleNodes(data) {
 let anchorHint = null
 
 function render(data) {
-  const { visible, byID, issueOfPR, subIssues } = visibleNodes(data)
+  const { visible, byID, issueOfPR, subIssues, carried } = visibleNodes(data)
   const anchor = captureViewport(anchorHint)
   anchorHint = null
 
@@ -422,7 +454,7 @@ function render(data) {
   lanesEl.innerHTML = ''
   positions = new Map()
 
-  const counts = { prs: countPRs(data, issueOfPR), subs: countSubIssues(data, subIssues) }
+  const counts = { prs: countPRs(data, issueOfPR), subs: countSubIssues(data, subIssues), carried }
   const lanes = sortLanes(groupIntoLanes(nodes, edges))
 
   for (const lane of lanes) {
@@ -658,6 +690,10 @@ function layoutLane(lane, laneEl) {
   const heights = new Map()
   const visiting = new Set()
 
+  // Measuring and placing have to agree on every gap, so both ask this.
+  const gapBetween = (above, below) =>
+    (tucked.has(above) || tucked.has(below) ? TUCKED_ROW_GAP : ROW_GAP)
+
   const measure = (id) => {
     if (heights.has(id)) return heights.get(id)
     if (visiting.has(id)) return 0
@@ -665,8 +701,10 @@ function layoutLane(lane, laneEl) {
     const own = boxOf(id).height
     const children = lane.children.get(id) || []
     let total = 0
-    for (const child of children) total += measure(child) + ROW_GAP
-    if (total > 0) total -= ROW_GAP
+    children.forEach((child, index) => {
+      total += measure(child)
+      if (index < children.length - 1) total += gapBetween(child, children[index + 1])
+    })
     const height = Math.max(own, total)
     visiting.delete(id)
     heights.set(id, height)
@@ -701,19 +739,22 @@ function layoutLane(lane, laneEl) {
     widest = Math.max(widest, left + box.width)
 
     let childTop = top
-    for (const child of lane.children.get(id) || []) {
+    const children = lane.children.get(id) || []
+    children.forEach((child, index) => {
       place(child, childTop)
-      childTop += (heights.get(child) || 0) + ROW_GAP
-    }
+      childTop += (heights.get(child) || 0)
+      if (index < children.length - 1) childTop += gapBetween(child, children[index + 1])
+    })
   }
 
   let top = 0
-  for (const id of roots) {
+  roots.forEach((id, index) => {
     place(id, top)
-    top += (heights.get(id) || 0) + ROW_GAP
-  }
+    top += heights.get(id) || 0
+    if (index < roots.length - 1) top += gapBetween(id, roots[index + 1])
+  })
 
-  return { height: Math.max(0, top - ROW_GAP) + LANE_PAD * 2, width: widest + LANE_PAD }
+  return { height: top + LANE_PAD * 2, width: widest + LANE_PAD }
 }
 
 // ------------------------------------------------------------------ node HTML
@@ -723,7 +764,8 @@ function createNode(node, counts, laneRepo) {
   element.dataset.id = node.id
   if (node.kind === 'issue') {
     element.className = `node ${issueClasses(node.issue)}${tucked.has(node.id) ? ' tucked' : ''}`
-    element.innerHTML = issueHTML(node, counts.prs.get(node.id) || 0, counts.subs.get(node.id) || 0, laneRepo)
+    element.innerHTML = issueHTML(node, counts.prs.get(node.id) || 0, counts.subs.get(node.id) || 0,
+      counts.carried.get(node.id), laneRepo)
   } else {
     element.className = `node pr ${node.pullRequest.state.toLowerCase()}${node.pullRequest.isDraft ? ' draft' : ''}`
     element.innerHTML = pullRequestHTML(node.pullRequest, laneRepo)
@@ -786,7 +828,7 @@ function labelColour(value) {
   return hex.length === 6 ? hex : 'd0d7de'
 }
 
-function issueHTML(node, prCount, subCount, laneRepo) {
+function issueHTML(node, prCount, subCount, carried, laneRepo) {
   const issue = node.issue
   const parts = []
   const closed = issue.state === 'CLOSED'
@@ -816,6 +858,15 @@ function issueHTML(node, prCount, subCount, laneRepo) {
   // want to see, and a button on every card would spend the width this is
   // meant to save. A tucked card keeps it visible — it is the way back.
   const isTucked = tucked.has(node.id)
+  if (isTucked && carried && (carried.issues > 0 || carried.prs > 0)) {
+    // What went under the line with it. Without this a tucked parent looks
+    // like an issue with nothing attached, and the board looks thinner than
+    // it is.
+    const parts = []
+    if (carried.issues > 0) parts.push(`${carried.issues} sub`)
+    if (carried.prs > 0) parts.push(`${carried.prs} PR${carried.prs === 1 ? '' : 's'}`)
+    top.push(`<span class="carried" title="${parts.join(', ')} tucked away with it">${parts.join(' · ')}</span>`)
+  }
   top.push(`<button type="button" class="tuck" data-tuck="${escapeHTML(node.id)}" aria-expanded="${!isTucked}" title="${isTucked ? 'open this card back up' : 'tuck this card into a single line'}">${ICON.chevron}</button>`)
   parts.push(`<div class="top">${top.join('')}</div>`)
 

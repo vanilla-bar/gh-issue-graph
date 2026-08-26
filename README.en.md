@@ -128,7 +128,7 @@ starts folded.
 | Bottom line of every card | **Why it is on the canvas**: `assigned to you`, `you opened it`, `sub-issue of #321`, `closes #534`, `refs #325`, `blocks #110`, `your pull request`. |
 | Lane header | Click it to open the repository, or to fold it away again. `↗` opens it on GitHub. |
 | `⌄ 2 PRs` | An issue's pull requests, **shown by default**. Click to fold them away; nothing is re-fetched either way. |
-| `⌃` in a card's corner | Appears when you point at the card. Click it to tuck the card into a single line — for an issue you have filed but are not working on, so it keeps its place without keeping its space. |
+| `⌃` in a card's corner | Appears when you point at the card. Click it to tuck the card into a single line, taking its sub-issues and pull requests down with it; the line ends with what went under it, as `3 sub · 3 PRs`. For an issue you have filed but are not working on: it keeps its place without keeping its space. |
 
 Which repositories you opened, what you folded inside them and which cards you
 tucked are all remembered in `localStorage`, so you land back where you were
