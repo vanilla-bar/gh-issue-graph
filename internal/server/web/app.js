@@ -1337,6 +1337,22 @@ function factsHTML(node) {
     out.push(sideBlock(node.kind === 'issue' ? 'Assignees' : 'Author', `<ul class="side-people">${people.map((who) =>
       `<li><img class="avatar" src="${escapeHTML(who.avatarUrl || '')}" alt="">${escapeHTML(who.login)}</li>`).join('')}</ul>`))
   }
+  if (node.kind === 'pullRequest' && (item.reviewers || []).length) {
+    // Already on the card as rings on avatars; here there is room to say who
+    // they are and what each one said, which is the question the panel is open
+    // to answer.
+    const heading = item.reviewTotal ? `Reviewers  ${item.reviewApproved}/${item.reviewTotal}` : 'Reviewers'
+    out.push(sideBlock(heading, `<ul class="side-people reviewers-list">${item.reviewers.map((who) => {
+      const said = who.state === 'APPROVED' ? 'approved'
+        : who.state === 'CHANGES_REQUESTED' ? 'requested changes'
+          : who.state === 'COMMENTED' ? 'commented'
+            : who.requested ? 'review requested' : 'no review yet'
+      const face = who.isTeam || !who.avatarUrl
+        ? `<span class="avatar face team">${escapeHTML(who.login.slice(0, 1).toUpperCase())}</span>`
+        : `<img class="avatar" src="${escapeHTML(who.avatarUrl)}" alt="">`
+      return `<li>${face}<span class="who"><span class="login">${escapeHTML(who.login)}</span><span class="said">${escapeHTML(said)}${who.requested && who.state ? ', asked again' : ''}</span></span></li>`
+    }).join('')}</ul>`))
+  }
   if (node.kind === 'issue' && (item.labels || []).length) {
     out.push(sideBlock('Labels', `<div class="side-chips">${item.labels.map((label) =>
       `<span class="chip label"><i class="dot" data-colour="${labelColour(label.color)}"></i>${escapeHTML(label.name)}</span>`).join('')}</div>`))
@@ -1351,6 +1367,35 @@ function factsHTML(node) {
     out.push(sideBlock('Updated', `<p class="side-plain">${escapeHTML(relativeTime(item.updatedAt))}</p>`))
   }
   return out.join('')
+}
+
+// The tail of the conversation, under the body. Reviews carry what they were:
+// an approval reads differently from the same words with changes requested
+// attached, and the card only ever showed the count.
+function commentsHTML(detail) {
+  const said = (detail && detail.comments) || []
+  if (!said.length) return ''
+  const rows = said.map((comment) => {
+    const state = comment.reviewState === 'APPROVED' ? 'approved'
+      : comment.reviewState === 'CHANGES_REQUESTED' ? 'requested changes'
+        : comment.reviewState ? 'reviewed' : ''
+    const kind = comment.reviewState === 'APPROVED' ? 'ok'
+      : comment.reviewState === 'CHANGES_REQUESTED' ? 'bad' : 'warn'
+    const who = comment.author || {}
+    const head = [
+      who.avatarUrl ? `<img class="avatar" src="${escapeHTML(who.avatarUrl)}" alt="">` : '',
+      `<span class="login">${escapeHTML(who.login || 'ghost')}</span>`,
+      state ? `<span class="said ${kind}">${escapeHTML(state)}</span>` : '',
+      `<span class="when">${escapeHTML(relativeTime(comment.createdAt))}</span>`,
+    ].join('')
+    return `<article class="comment"><header>${head}</header><div class="rendered">${comment.bodyHtml || ''}</div></article>`
+  })
+  const hidden = (detail.commentTotal || said.length) - said.length
+  // Cutting a thread short without saying so reads as the whole conversation.
+  const more = hidden > 0
+    ? `<p class="side-plain more-said">${hidden} earlier comment${hidden === 1 ? '' : 's'} not shown.</p>`
+    : ''
+  return `<section class="conversation"><h3>Conversation</h3>${more}${rows.join('')}</section>`
 }
 
 async function openDrawer(nodeID) {
@@ -1388,7 +1433,8 @@ async function openDrawer(nodeID) {
 
   const markdown = document.getElementById('drawer-markdown')
   const cached = bodies.get(nodeID)
-  markdown.innerHTML = cached === undefined ? '<p class="side-plain">Loading…</p>' : cached
+  const paint = (detail) => `<div class="rendered">${detail.bodyHtml || '<p class="side-plain">No description provided.</p>'}</div>${commentsHTML(detail)}`
+  markdown.innerHTML = cached === undefined ? '<p class="side-plain">Loading…</p>' : paint(cached)
 
   drawer.hidden = false
   scrim.hidden = false
@@ -1403,10 +1449,10 @@ async function openDrawer(nodeID) {
     // item's own id.
     const response = await fetch(`/api/v1/detail?id=${encodeURIComponent(item.id)}`)
     const payload = await response.json()
+    if (response.ok) bodies.set(nodeID, payload)
     const html = response.ok
-      ? (payload.bodyHtml || '<p class="side-plain">No description provided.</p>')
+      ? paint(payload)
       : `<p class="side-plain">Could not load the body: ${escapeHTML(payload.error || response.status)}</p>`
-    if (response.ok) bodies.set(nodeID, html)
     // Somebody may have opened another card while this was in flight.
     if (openNodeID === nodeID) markdown.innerHTML = html
   } catch (error) {
