@@ -757,6 +757,8 @@ header#topbar {
    line: a long owner/name would otherwise be the tallest thing on the card. */
 .node .repo {
   margin-left: auto;
+  /* Room for the tuck control pinned to the corner above it. */
+  padding-right: 18px;
   color: var(--fg-4);
   white-space: nowrap;
   overflow: hidden;
@@ -776,6 +778,68 @@ header#topbar {
 }
 
 .node .title:hover { color: var(--blue); text-decoration: underline; text-underline-offset: 2px; }
+
+/* The tuck control. Invisible until the pointer is on the card, so a board of
+   cards carries no extra furniture, but kept in the layout either way — an
+   appearing button that also shifts the row would move the target out from
+   under the cursor on the way to it. */
+.node .tuck {
+  /* Pinned to the card's corner rather than placed in the row. The row's own
+     right edge belongs to whatever is in it — a repository name, or nothing at
+     all — so a control laid out there lands in a different place on every card. */
+  position: absolute;
+  top: 8px;
+  right: 9px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--fg-4);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity .12s ease, background .12s ease, color .12s ease;
+}
+.node .tuck svg { display: block; width: 13px; height: 13px; transform: rotate(-90deg); }
+.node .tuck:hover { background: var(--surface-3); color: var(--fg-2); }
+.node:hover .tuck, .node .tuck:focus-visible { opacity: 1; }
+/* Nothing else on a tucked card says it can be opened, so the way back stays. */
+.node.tucked .tuck { opacity: 1; }
+.node.tucked .tuck svg { transform: none; }
+/* A repository name would push the control off the end of a one-line card. */
+.node.tucked .repo, .node.tucked .chip.type, .node.tucked .flag { display: none; }
+
+/* Tucked: the whole card on one line. The title moves up beside the number
+   instead of below it, and everything that explains the issue goes away —
+   what is left is enough to recognise it and to click it open again. */
+.node.tucked {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+/* The glyph and the number are inside .top, and the title is its sibling. Let
+   .top's children join the card's own row so all three sit on one line, then
+   put the title between the number and the control with `order`. */
+.node.tucked .top { display: contents; }
+.node.tucked .title {
+  order: 1;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.node.tucked .tuck { position: static; order: 2; flex: none; }
+.node.tucked .meta, .node.tucked .reasons { display: none; }
 
 .node .meta {
   display: flex;

@@ -104,8 +104,7 @@ repository is scanned.
 
 Each repository is a lane. Lanes are ordered by most recent activity by
 default; the `sort` control switches to name or open-issue count. Every lane
-starts folded. Which repositories you opened is remembered in `localStorage`,
-so you land back where you were after a reload.
+starts folded.
 
 ## What the picture means
 
@@ -129,6 +128,11 @@ so you land back where you were after a reload.
 | Bottom line of every card | **Why it is on the canvas**: `assigned to you`, `you opened it`, `sub-issue of #321`, `closes #534`, `refs #325`, `blocks #110`, `your pull request`. |
 | Lane header | Click it to open the repository, or to fold it away again. `↗` opens it on GitHub. |
 | `⌄ 2 PRs` | An issue's pull requests, **shown by default**. Click to fold them away; nothing is re-fetched either way. |
+| `⌃` in a card's corner | Appears when you point at the card. Click it to tuck the card into a single line — for an issue you have filed but are not working on, so it keeps its place without keeping its space. |
+
+Which repositories you opened, what you folded inside them and which cards you
+tucked are all remembered in `localStorage`, so you land back where you were
+after a reload. `unfold all` opens the folds; it leaves tucked cards tucked.
 
 ### Edges
 

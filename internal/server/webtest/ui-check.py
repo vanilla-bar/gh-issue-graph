@@ -566,6 +566,111 @@ def main():
               ws.evaluate("document.querySelector('.lane-head .age').textContent !== 'STALE'"),
               ws.evaluate("document.querySelector('.lane-head .age').textContent"))
 
+        # Tucking, and what a reload remembers. Last, because it is the only
+        # part that deliberately leaves something in localStorage.
+        def reload_board():
+            ws.call("Page.reload", {"ignoreCache": True})
+            time.sleep(1.5)
+            for _ in range(60):
+                if ws.evaluate("document.querySelectorAll('#lanes .node').length"):
+                    break
+                time.sleep(0.3)
+            time.sleep(0.7)
+
+        def shut_counts():
+            return ws.evaluate("""(() => {
+              const shut = (sel) => [...document.querySelectorAll(sel)]
+                .filter((b) => b.getAttribute('aria-expanded') === 'false').length
+              return { tucked: document.querySelectorAll('#lanes .node.tucked').length,
+                       prs: shut('[data-toggle]'), subs: shut('[data-toggle-subs]') }
+            })()""")
+
+        # Pick a control that is on screen and not inside a tucked card, whose
+        # chips are display:none and therefore have no box to click.
+        def clickable(selector):
+            return ws.evaluate("""(() => {
+              const el = [...document.querySelectorAll(%s)].find((b) => {
+                const r = b.getBoundingClientRect()
+                return r.width > 0 && r.top > 140 && r.bottom < window.innerHeight - 140
+              })
+              if (!el) return null
+              const r = el.getBoundingClientRect()
+              return {x: r.left + r.width / 2, y: r.top + r.height / 2, text: el.textContent.trim()}
+            })()""" % json.dumps(selector))
+
+        # Folding inside a lane used to be forgotten on reload while the lanes
+        # themselves were remembered. Sub-issues first, on their own: folding a
+        # parent takes its children's own toggles off the board with them.
+        sub_toggle = clickable(".node [data-toggle-subs]")
+        check("a sub-issue toggle is reachable", bool(sub_toggle), json.dumps(sub_toggle))
+        click(ws, sub_toggle["x"], sub_toggle["y"], settle=0.6)
+        reload_board()
+        check("a reload keeps the sub-issues folded away", shut_counts()["subs"] == 1,
+              json.dumps(shut_counts()))
+        unfold = centre(ws, "#unfold-all")
+        click(ws, unfold["x"], unfold["y"], settle=0.9)
+        check("unfold all opens them again", shut_counts()["subs"] == 0, json.dumps(shut_counts()))
+
+        pr_toggle = clickable(".node [data-toggle]")
+        click(ws, pr_toggle["x"], pr_toggle["y"], settle=0.6)
+        check("a pull request fold takes hold", shut_counts()["prs"] == 1,
+              f"clicked {json.dumps(pr_toggle)}")
+
+        tuck_card = """(() => {
+          const card = [...document.querySelectorAll('#lanes .node:not(.pr)')]
+            .find((n) => n.querySelector('.number').textContent.includes('#120'))
+          if (!card) return null
+          const r = card.getBoundingClientRect()
+          const b = card.querySelector('.tuck')
+          const bb = b.getBoundingClientRect()
+          return {
+            id: card.dataset.id, height: r.height, top: r.top,
+            tucked: card.classList.contains('tucked'),
+            opacity: getComputedStyle(b).opacity,
+            meta: !!card.querySelector('.meta') && getComputedStyle(card.querySelector('.meta')).display,
+            x: r.left + 60, y: r.top + 14,
+            tuckX: bb.left + bb.width / 2, tuckY: bb.top + bb.height / 2,
+          }
+        })()"""
+        resting = ws.evaluate(tuck_card)
+        check("an issue card carries a tuck control", bool(resting), json.dumps(resting))
+        if resting:
+            check("the control is out of sight until you point at the card",
+                  resting["opacity"] == "0", f"opacity {resting['opacity']}")
+            mouse(ws, "mouseMoved", resting["x"], resting["y"])
+            time.sleep(0.4)
+            check("pointing at the card brings it out",
+                  ws.evaluate(tuck_card)["opacity"] == "1",
+                  f"opacity {ws.evaluate(tuck_card)['opacity']}")
+
+            click(ws, resting["tuckX"], resting["tuckY"], settle=0.7)
+            mouse(ws, "mouseMoved", 1500, 860)
+            time.sleep(0.3)
+            small = ws.evaluate(tuck_card)
+            check("clicking it tucks the card into a line",
+                  small["tucked"] and small["height"] < resting["height"] / 2,
+                  f"{resting['height']:.0f}px -> {small['height']:.0f}px")
+            check("the chips and the reason line go with it", small["meta"] == "none",
+                  f"meta display: {small['meta']}")
+            check("the way back stays visible on a tucked card",
+                  small["opacity"] == "1", f"opacity {small['opacity']}")
+
+            stored = ws.evaluate("localStorage.getItem('gh-issue-graph:cards')")
+            check("the folds are written down", bool(stored) and "issue:" in stored, str(stored))
+
+            reload_board()
+            back = shut_counts()
+            check("a reload keeps the card tucked", back["tucked"] == 1, json.dumps(back))
+            check("and keeps the pull requests folded away", back["prs"] == 1, json.dumps(back))
+
+            unfold = centre(ws, "#unfold-all")
+            click(ws, unfold["x"], unfold["y"], settle=0.9)
+            after_unfold = shut_counts()
+            check("unfold all opens every fold inside the lanes",
+                  after_unfold["prs"] == 0 and after_unfold["subs"] == 0, json.dumps(after_unfold))
+            check("but leaves a tucked card tucked — that is a different decision",
+                  after_unfold["tucked"] == 1, json.dumps(after_unfold))
+
         check("no javascript errors", not ws.evaluate("(window.__errors || []).length"))
 
         for line in checks:

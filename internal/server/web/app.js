@@ -64,17 +64,18 @@ const fields = {
   auto: document.getElementById('auto'),
 }
 
-// Issues whose pull requests are hidden. The set is of what is *closed*, not
-// of what is open, because the default is open: once you have chosen to look
-// inside a repository, you want the work that is happening in it, and a pull
-// request is where the work is. Nothing is refetched either way — the whole
-// graph is already in memory — so hiding them buys only space.
-const collapsed = new Set()
-
-// Issues whose sub-issues are hidden, along with everything hanging off them.
-// Same shape and lifetime as `collapsed` above: open by default, and dropped on
-// reload rather than stored, so a fold never outlives the board it was made on.
-const foldedSubs = new Set()
+// What the reader has shut, keyed by node id. Each set is of what is *closed*,
+// not of what is open, because the default is open: once you have chosen to
+// look inside a repository, you want the work that is happening in it. Nothing
+// is refetched either way — the whole graph is already in memory — so hiding
+// something buys only space.
+//
+// All three survive a reload. Half of them used to and half did not, which made
+// the board's memory impossible to predict: the lanes you had opened came back,
+// the folds you had made inside them did not.
+const collapsed = new Set()   // issues whose pull requests are hidden
+const foldedSubs = new Set()  // issues whose sub-issues, and their subtrees, are hidden
+const tucked = new Set()      // issues drawn as a single line
 
 // Glyphs. Inline SVG rather than Unicode: the CSP rules out an icon font, and
 // characters like U+26A0 render as a different weight — sometimes as emoji —
@@ -134,6 +135,45 @@ function storeFolds() {
   } catch {
     // Private windows and blocked site data are fine; folding just will not stick.
   }
+}
+
+// What is shut inside the lanes, keyed by node id rather than by number: an
+// issue's node id is stable and unique across repositories, which `#120` is not.
+//
+// Ids of issues that have since closed are left in place. Dropping whatever the
+// current search does not return would throw away a choice made about a
+// repository this search happens not to cover — the same reason the lane set
+// keeps names it cannot see — and an id is thirty bytes, so a board's worth of
+// them is nowhere near what localStorage holds.
+const CARDS_KEY = 'gh-issue-graph:cards'
+
+function readStoredCards() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(CARDS_KEY) || '{}')
+    const list = (value) => (Array.isArray(value) ? value.filter((id) => typeof id === 'string') : [])
+    return { prs: list(stored.prs), subs: list(stored.subs), tucked: list(stored.tucked) }
+  } catch {
+    return { prs: [], subs: [], tucked: [] }
+  }
+}
+
+function storeCards() {
+  try {
+    localStorage.setItem(CARDS_KEY, JSON.stringify({
+      prs: [...collapsed], subs: [...foldedSubs], tucked: [...tucked],
+    }))
+  } catch {
+    // ignored, see storeFolds
+  }
+}
+
+// Filled here rather than at the declarations above, which run before CARDS_KEY
+// exists.
+{
+  const stored = readStoredCards()
+  for (const id of stored.prs) collapsed.add(id)
+  for (const id of stored.subs) foldedSubs.add(id)
+  for (const id of stored.tucked) tucked.add(id)
 }
 
 function readStoredSort() {
@@ -682,7 +722,7 @@ function createNode(node, counts, laneRepo) {
   const element = document.createElement('article')
   element.dataset.id = node.id
   if (node.kind === 'issue') {
-    element.className = `node ${issueClasses(node.issue)}`
+    element.className = `node ${issueClasses(node.issue)}${tucked.has(node.id) ? ' tucked' : ''}`
     element.innerHTML = issueHTML(node, counts.prs.get(node.id) || 0, counts.subs.get(node.id) || 0, laneRepo)
   } else {
     element.className = `node pr ${node.pullRequest.state.toLowerCase()}${node.pullRequest.isDraft ? ' draft' : ''}`
@@ -771,6 +811,12 @@ function issueHTML(node, prCount, subCount, laneRepo) {
   }
   if (issue.issueType) top.push(`<span class="chip type">${escapeHTML(issue.issueType.name)}</span>`)
   top.push(otherRepoHTML(issue.repository, laneRepo))
+  // Last in the row so it sits at the far edge, and out of sight until the
+  // pointer is on the card: an issue you have filed for later is still one you
+  // want to see, and a button on every card would spend the width this is
+  // meant to save. A tucked card keeps it visible — it is the way back.
+  const isTucked = tucked.has(node.id)
+  top.push(`<button type="button" class="tuck" data-tuck="${escapeHTML(node.id)}" aria-expanded="${!isTucked}" title="${isTucked ? 'open this card back up' : 'tuck this card into a single line'}">${ICON.chevron}</button>`)
   parts.push(`<div class="top">${top.join('')}</div>`)
 
   parts.push(`<a class="title" href="${escapeHTML(issue.url)}" target="_blank" rel="noreferrer">${escapeHTML(issue.title)}</a>`)
@@ -1118,12 +1164,25 @@ lanesEl.addEventListener('click', (event) => {
     return
   }
 
+  const tuck = event.target.closest('[data-tuck]')
+  if (tuck) {
+    event.preventDefault()
+    const id = tuck.dataset.tuck
+    if (tucked.has(id)) tucked.delete(id)
+    else tucked.add(id)
+    storeCards()
+    anchorHint = id
+    if (sourceData) render(sourceData)
+    return
+  }
+
   const subs = event.target.closest('[data-toggle-subs]')
   if (subs) {
     event.preventDefault()
     const id = subs.dataset.toggleSubs
     if (foldedSubs.has(id)) foldedSubs.delete(id)
     else foldedSubs.add(id)
+    storeCards()
     // Hold the parent still; its subtree grows and shrinks below it.
     anchorHint = id
     if (sourceData) render(sourceData)
@@ -1136,6 +1195,7 @@ lanesEl.addEventListener('click', (event) => {
   const id = toggle.dataset.toggle
   if (collapsed.has(id)) collapsed.delete(id)
   else collapsed.add(id)
+  storeCards()
   // Hold the issue you clicked still; the pull requests appear beneath it.
   anchorHint = id
   if (sourceData) render(sourceData)
@@ -1172,11 +1232,17 @@ foldAllButton.addEventListener('click', () => {
 
 unfoldAllButton.addEventListener('click', () => {
   for (const name of everyRepositoryName()) unfolded.add(name)
-  // Unfold means unfold: a subtree folded inside a lane would otherwise stay
+  // Unfold means unfold: anything folded inside a lane would otherwise stay
   // shut behind a button that claims to have opened everything. Fold all is
   // not the mirror of this — it hides the lanes, so what is folded within one
   // is out of sight anyway and worth keeping for when the lane comes back.
+  //
+  // Tucked cards are left alone. Folding is about what you want on the screen
+  // right now; tucking is a note that this issue is not what you are working
+  // on, and a button labelled "unfold all" has no business overruling it.
+  collapsed.clear()
   foldedSubs.clear()
+  storeCards()
   storeFolds()
   anchorHint = firstRepositoryNodeID()
   if (sourceData) render(sourceData)
