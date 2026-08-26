@@ -1341,8 +1341,7 @@ button.chip[aria-expanded="true"] .caret { transform: rotate(90deg); }
   text-overflow: ellipsis;
 }
 
-#drawer-close {
-  margin-left: auto;
+#drawer-copy, #drawer-close {
   display: grid;
   place-items: center;
   width: 26px;
@@ -1354,8 +1353,38 @@ button.chip[aria-expanded="true"] .caret { transform: rotate(90deg); }
   color: var(--fg-3);
   cursor: pointer;
 }
-#drawer-close:hover { background: var(--surface-3); color: var(--fg); }
-#drawer-close svg { width: 15px; height: 15px; }
+#drawer-copy { margin-left: auto; position: relative; }
+#drawer-copy:hover, #drawer-close:hover { background: var(--surface-3); color: var(--fg); }
+#drawer-copy svg, #drawer-close svg { width: 15px; height: 15px; }
+
+/* Said once, next to the button, and gone again. A copy that reports nothing
+   leaves you pressing it twice to be sure. */
+#drawer-copy .said {
+  position: absolute;
+  right: calc(100% + 4px);
+  padding: 2px 7px;
+  border-radius: var(--radius-chip);
+  background: var(--green-soft);
+  color: var(--green);
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .12s ease;
+}
+#drawer-copy.is-copied { color: var(--green); }
+#drawer-copy.is-copied .said { opacity: 1; }
+
+/* The fallback copy needs a real, selectable element that nobody can see. */
+.offscreen {
+  position: fixed;
+  top: 0;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
 
 #drawer-title {
   margin: 8px 0 0;

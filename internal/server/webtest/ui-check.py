@@ -237,6 +237,12 @@ def main():
         ws = WS(endpoint)
         ws.call("Page.enable")
         ws.call("Runtime.enable")
+        # The drawer's copy button writes to the clipboard, and headless Chrome
+        # denies that by default.
+        ws.call("Browser.grantPermissions", {
+            "origin": f"http://127.0.0.1:{SERVER_PORT}",
+            "permissions": ["clipboardReadWrite", "clipboardSanitizedWrite"],
+        })
 
         # Folds are persisted, so a previous run would otherwise start this one
         # with lanes already collapsed.
@@ -954,6 +960,24 @@ def main():
             check("what was left out is admitted to",
                   pr_open["more"] is not None and "4 earlier" in pr_open["more"],
                   str(pr_open["more"]))
+
+            # The link that gets pasted into a message has to be the one that
+            # opens on somebody else's machine, which a board on 127.0.0.1
+            # never will.
+            check("the copy button says nothing until it is pressed",
+                  ws.evaluate("getComputedStyle(document.querySelector('#drawer-copy .said')).opacity") == "0")
+            copy = centre(ws, "#drawer-copy")
+            click(ws, copy["x"], copy["y"], settle=0.6)
+            copied = ws.evaluate("""(async () => ({
+              said: getComputedStyle(document.querySelector('#drawer-copy .said')).opacity,
+              clipboard: await navigator.clipboard.readText().catch((e) => 'ERR ' + e),
+            }))()""")
+            check("it copies the GitHub link, not this page's",
+                  copied["clipboard"].startswith("https://github.com/")
+                  and copied["clipboard"].endswith("/pull/210"),
+                  json.dumps(copied["clipboard"]))
+            check("and says so", copied["said"] == "1", json.dumps(copied))
+
             ws.evaluate("document.getElementById('drawer-close').click()")
             time.sleep(0.4)
 
@@ -962,6 +986,8 @@ def main():
         quiet = card_point("#110")
         if quiet:
             click(ws, quiet["x"], quiet["y"], settle=1.2)
+            check("opening another card clears the copied mark",
+                  not ws.evaluate("document.getElementById('drawer-copy').classList.contains('is-copied')"))
             silent = drawer_state()
             check("a card with no conversation shows no conversation",
                   len(silent["comments"]) == 0 and silent["more"] is None,
