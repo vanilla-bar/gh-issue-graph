@@ -1263,6 +1263,7 @@ function restoreViewport(anchor) {
 // back to a card you have already read costs nothing.
 const bodies = new Map()
 let openNodeID = null
+let openURL = null
 
 function closeDrawer() {
   openNodeID = null
@@ -1414,6 +1415,7 @@ async function openDrawer(nodeID) {
   const numberEl = document.getElementById('drawer-number')
   numberEl.textContent = `${node.kind === 'issue' ? '#' : 'PR #'}${item.number}`
   numberEl.href = item.url
+  openURL = item.url
   document.getElementById('drawer-repo').textContent = item.repository || ''
   document.getElementById('drawer-title').textContent = item.title
 
@@ -1436,6 +1438,7 @@ async function openDrawer(nodeID) {
   const paint = (detail) => `<div class="rendered">${detail.bodyHtml || '<p class="side-plain">No description provided.</p>'}</div>${commentsHTML(detail)}`
   markdown.innerHTML = cached === undefined ? '<p class="side-plain">Loading…</p>' : paint(cached)
 
+  copyButton.classList.remove('is-copied')
   drawer.hidden = false
   scrim.hidden = false
   // Two frames: the element has to be laid out at translateX(100%) before the
@@ -1461,6 +1464,37 @@ async function openDrawer(nodeID) {
     }
   }
 }
+
+// Copying the GitHub link, not this page's: a board served on 127.0.0.1 opens
+// on nobody else's machine, and what gets pasted into a message has to.
+const copyButton = document.getElementById('drawer-copy')
+let copiedFor = null
+copyButton.addEventListener('click', async () => {
+  if (!openURL) return
+  try {
+    await navigator.clipboard.writeText(openURL)
+  } catch {
+    // Denied, or an older browser. Fall back to the one thing that has always
+    // worked: a selection and the copy command.
+    const carrier = document.createElement('textarea')
+    carrier.value = openURL
+    carrier.setAttribute('readonly', '')
+    carrier.className = 'offscreen'
+    document.body.appendChild(carrier)
+    carrier.select()
+    try {
+      document.execCommand('copy')
+    } catch {
+      // Nothing left to try; the link is still on screen as the number's href.
+      return
+    } finally {
+      carrier.remove()
+    }
+  }
+  copyButton.classList.add('is-copied')
+  clearTimeout(copiedFor)
+  copiedFor = setTimeout(() => copyButton.classList.remove('is-copied'), 1400)
+})
 
 document.getElementById('drawer-close').addEventListener('click', closeDrawer)
 scrim.addEventListener('click', closeDrawer)
