@@ -1,3 +1,4 @@
 /gh-issue-graph
 dist/
 .DS_Store
+__pycache__/
