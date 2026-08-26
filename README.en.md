@@ -122,7 +122,7 @@ so you land back where you were after a reload.
 | ✓ purple, faded card | Closed |
 | ⚠ `wrap up` | **Needs wrapping up**: every sub-issue is done but the issue is still open, or a pull request was merged and it never closed. |
 | ⊘ `1 blocker` | Waiting on another issue. |
-| `4/6` and a meter | Sub-issue progress. |
+| `4/6` and a meter | Sub-issue progress. When children are drawn below it the chip becomes a button: click it to fold that whole subtree away, pull requests included. **Shown by default.** |
 | Coloured dot on a label | The label's own GitHub colour. The name stays at reading contrast whatever that colour is. |
 | PR card, `merged` / `open` / `draft` / `closed` | The state, as a word and as the colour of the card's left edge. |
 | `👁 review requested` | GitHub is waiting on **you** to review it. Blue, like everything else on a card that is about you rather than about the work. |
