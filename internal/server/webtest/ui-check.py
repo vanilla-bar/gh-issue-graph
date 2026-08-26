@@ -836,7 +836,7 @@ def main():
                   .map((h) => h.textContent),
                 side: [...document.querySelectorAll('#drawer-side .side-block h3')].map((h) => h.textContent),
                 scrimShown: !scrim.hidden,
-                comments: [...document.querySelectorAll('.comment')].map((c) => ({
+                comments: [...document.querySelectorAll('.conversation .comment')].map((c) => ({
                   who: (c.querySelector('.login') || {}).textContent,
                   said: (c.querySelector('.said') || {}).textContent || null,
                   when: (c.querySelector('.when') || {}).textContent,
@@ -948,18 +948,78 @@ def main():
                   json.dumps(pr_open["side"]))
 
             # The conversation, oldest first, with reviews wearing their state.
-            check("the conversation is under the body", len(pr_open["comments"]) == 3,
+            check("the conversation is under the body", len(pr_open["comments"]) == 4,
                   json.dumps(pr_open["comments"]))
             check("it runs oldest first",
-                  [c["who"] for c in pr_open["comments"]] == ["mona", "octocat", "mona"],
+                  [c["who"] for c in pr_open["comments"]] == ["mona", "octocat", "mona", "octocat"],
                   json.dumps([c["who"] for c in pr_open["comments"]]))
             check("a review says what it decided",
-                  [c["said"] for c in pr_open["comments"]] == ["requested changes", None, "approved"],
+                  [c["said"] for c in pr_open["comments"]]
+                  == ["requested changes", None, "approved", None],
                   json.dumps([c["said"] for c in pr_open["comments"]]))
             # A thread cut short without saying so reads as the whole thing.
             check("what was left out is admitted to",
                   pr_open["more"] is not None and "4 earlier" in pr_open["more"],
                   str(pr_open["more"]))
+
+            # Where one comment ends and the next begins. Indentation alone
+            # stopped saying it once a body could carry its own headings.
+            frames = ws.evaluate("""(() => {
+              const rows = [...document.querySelectorAll('.comment')].map((c) => {
+                const cs = getComputedStyle(c)
+                const head = getComputedStyle(c.querySelector('header'))
+                return {
+                  border: parseFloat(cs.borderTopWidth),
+                  headBorder: parseFloat(head.borderBottomWidth),
+                  headTinted: head.backgroundColor !== cs.backgroundColor,
+                }
+              })
+              // A comment's own heading must not be dressed as a section label.
+              const inner = document.querySelector('.comment .rendered h3')
+              const section = document.querySelector('.conversation > h3')
+              return {
+                rows,
+                innerTransform: inner ? getComputedStyle(inner).textTransform : null,
+                innerSize: inner ? parseFloat(getComputedStyle(inner).fontSize) : null,
+                sectionTransform: section ? getComputedStyle(section).textTransform : null,
+                sectionSize: section ? parseFloat(getComputedStyle(section).fontSize) : null,
+              }
+            })()""")
+            check("every comment is drawn in its own frame",
+                  len(frames["rows"]) > 0 and all(r["border"] >= 1 for r in frames["rows"]),
+                  json.dumps(frames["rows"]))
+            check("its header is set off from the body it introduces",
+                  all(r["headBorder"] >= 1 and r["headTinted"] for r in frames["rows"]),
+                  json.dumps(frames["rows"]))
+            # The body is the first thing somebody wrote, so it wears the same
+            # frame. Left bare it read as a loose paragraph above a list of
+            # framed replies.
+            body_card = ws.evaluate("""(() => {
+              const el = document.querySelector('.comment.is-body')
+              if (!el) return null
+              const cs = getComputedStyle(el)
+              const head = el.querySelector('header')
+              return {
+                border: parseFloat(cs.borderTopWidth),
+                inConversation: !!el.closest('.conversation'),
+                who: (head.querySelector('.login') || {}).textContent,
+                opened: (head.querySelector('.opened') || {}).textContent,
+                when: (head.querySelector('.when') || {}).textContent,
+              }
+            })()""")
+            check("the body is drawn in the same frame as a comment",
+                  body_card and body_card["border"] >= 1 and not body_card["inConversation"],
+                  json.dumps(body_card))
+            check("and its header says who opened it, and when",
+                  body_card and body_card["who"] and "opened this" in (body_card["opened"] or "")
+                  and (body_card["when"] or "").strip() != "",
+                  json.dumps(body_card))
+
+            check("a heading inside a comment is not dressed as a section label",
+                  frames["innerTransform"] == "none"
+                  and frames["sectionTransform"] == "uppercase"
+                  and frames["innerSize"] > frames["sectionSize"],
+                  json.dumps({k: v for k, v in frames.items() if k != "rows"}))
 
             # The link that gets pasted into a message has to be the one that
             # opens on somebody else's machine, which a board on 127.0.0.1

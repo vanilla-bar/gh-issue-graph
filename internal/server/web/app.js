@@ -1435,7 +1435,22 @@ async function openDrawer(nodeID) {
 
   const markdown = document.getElementById('drawer-markdown')
   const cached = bodies.get(nodeID)
-  const paint = (detail) => `<div class="rendered">${detail.bodyHtml || '<p class="side-plain">No description provided.</p>'}</div>${commentsHTML(detail)}`
+  // The body is the first thing somebody wrote here, so it is drawn as the
+  // same kind of card as everything they wrote after it. Leaving it bare made
+  // the panel look like one loose paragraph followed by a list of framed
+  // replies.
+  const opener = node.kind === 'issue' ? 'opened this issue' : 'opened this pull request'
+  const paint = (detail) => {
+    const head = [
+      item.author && item.author.avatarUrl
+        ? `<img class="avatar" src="${escapeHTML(item.author.avatarUrl)}" alt="">` : '',
+      `<span class="login">${escapeHTML((item.author && item.author.login) || 'ghost')}</span>`,
+      `<span class="opened">${opener}</span>`,
+      detail.createdAt ? `<span class="when">${escapeHTML(relativeTime(detail.createdAt))}</span>` : '',
+    ].join('')
+    const body = detail.bodyHtml || '<p class="side-plain">No description provided.</p>'
+    return `<article class="comment is-body"><header>${head}</header><div class="rendered">${body}</div></article>${commentsHTML(detail)}`
+  }
   markdown.innerHTML = cached === undefined ? '<p class="side-plain">Loading…</p>' : paint(cached)
 
   copyButton.classList.remove('is-copied')

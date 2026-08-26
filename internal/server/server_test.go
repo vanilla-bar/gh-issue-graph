@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vanilla-bar/gh-issue-graph/internal/github"
 	"github.com/vanilla-bar/gh-issue-graph/internal/graph"
@@ -34,6 +35,7 @@ func (f *fakeLoader) Load(ctx context.Context, options graph.SearchOptions, prog
 type detailingLoader struct {
 	fakeLoader
 	body    string
+	created time.Time
 	err     error
 	askedID string
 }
@@ -43,11 +45,14 @@ func (d *detailingLoader) Detail(ctx context.Context, id string) (graph.Detail, 
 	if d.err != nil {
 		return graph.Detail{}, d.err
 	}
-	return graph.Detail{ID: id, BodyHTML: d.body}, nil
+	return graph.Detail{ID: id, BodyHTML: d.body, CreatedAt: d.created}, nil
 }
 
 func TestDetailEndpointReturnsTheBody(t *testing.T) {
-	loader := &detailingLoader{body: "<p>why this matters</p>"}
+	loader := &detailingLoader{
+		body:    "<p>why this matters</p>",
+		created: time.Date(2026, 8, 26, 9, 0, 0, 0, time.UTC),
+	}
 	server := httptest.NewServer((&Server{Loader: loader}).handler())
 	defer server.Close()
 
@@ -65,6 +70,11 @@ func TestDetailEndpointReturnsTheBody(t *testing.T) {
 	}
 	if detail.BodyHTML != loader.body {
 		t.Fatalf("bodyHtml = %q, want %q", detail.BodyHTML, loader.body)
+	}
+	// The drawer dates the body's card with this; dropping it would leave the
+	// first card the only one with no time on it.
+	if !detail.CreatedAt.Equal(loader.created) {
+		t.Fatalf("createdAt = %v, want %v", detail.CreatedAt, loader.created)
 	}
 	if loader.askedID != "I_100" {
 		t.Fatalf("the loader was asked for %q, want I_100", loader.askedID)

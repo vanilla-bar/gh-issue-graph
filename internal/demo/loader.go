@@ -43,7 +43,15 @@ func (l *Loader) Detail(ctx context.Context, id string) (graph.Detail, error) {
 		body = "<p><em>No description provided.</em></p>"
 	}
 	said := demoComments(l.started, id)
-	return graph.Detail{ID: id, BodyHTML: body, Comments: said, CommentTotal: demoTotals(id, len(said))}, nil
+	// Opened before anything was said about it.
+	opened := l.started.Add(-30 * time.Hour)
+	if len(said) > 0 {
+		opened = said[0].CreatedAt.Add(-time.Hour)
+	}
+	return graph.Detail{
+		ID: id, BodyHTML: body, CreatedAt: opened,
+		Comments: said, CommentTotal: demoTotals(id, len(said)),
+	}, nil
 }
 
 // demoComments covers what the panel has to lay out: an ordinary comment, a
@@ -60,6 +68,19 @@ fine, but it is worth a note in the code so nobody is surprised later.</p>`},
 				BodyHTML: `<p>Added the note, and a guard at 8 MB that falls back to streaming.</p>`},
 			{Author: user("mona"), CreatedAt: ago(18), ReviewState: graph.ReviewApproved,
 				BodyHTML: `<p>Reads well now. Thanks.</p>`},
+			// A long one, with the structure a real comment has. Two of these in
+			// a row is what makes the boundary between them worth drawing.
+			{Author: user(viewer), CreatedAt: ago(17),
+				BodyHTML: `<p>Writing down what changed, since the thread is getting long.</p>
+<h3>The two points raised</h3>
+<blockquote><p>The parser reads the whole file into memory.</p></blockquote>
+<p><strong>Handled.</strong> Above 8 MB it streams instead, and the note says why
+the small path is still there.</p>
+<ul><li>Headings become steps</li>
+<li>A list under a heading becomes its ingredients</li>
+<li>Anything else is kept as a note</li></ul>
+<p>The importer is unchanged for files under that size, so nothing that worked
+before behaves differently.</p>`},
 		}
 	case "PR_220":
 		return []graph.Comment{

@@ -1555,7 +1555,10 @@ a.drawer-chip:hover { border-color: var(--border-2); color: var(--fg-2); }
   border-top: 1px solid var(--border);
 }
 
-.conversation h3 {
+/* The direct child only. A comment's own `h3` is a heading inside somebody's
+   text, and dressing it as a section label made it read as part of the panel's
+   furniture rather than as something they wrote. */
+.conversation > h3 {
   margin: 0 0 12px;
   font-size: 10.5px;
   font-weight: 600;
@@ -1566,14 +1569,25 @@ a.drawer-chip:hover { border-color: var(--border-2); color: var(--fg-2); }
 
 .more-said { margin-bottom: 14px; color: var(--fg-4); }
 
-.comment { margin-bottom: 18px; }
+/* Each comment in its own frame. Indentation alone was enough while the bodies
+   were a paragraph long; a comment carrying its own headings, quotes and lists
+   runs into the next one's header without a line to stop it. */
+.comment {
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  overflow: hidden;
+}
 .comment:last-child { margin-bottom: 0; }
 
 .comment header {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 6px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
   font-size: 11.5px;
 }
 .comment .login { font-weight: 600; color: var(--fg-2); }
@@ -1588,11 +1602,15 @@ a.drawer-chip:hover { border-color: var(--border-2); color: var(--fg-2); }
 .comment .said.bad { background: var(--red-soft); color: var(--red); }
 .comment .said.warn { background: var(--amber-soft); color: var(--amber); }
 .comment .when { margin-left: auto; color: var(--fg-4); }
+/* "opened this issue" — quiet, because the name beside it is the part that is
+   being read. */
+.comment .opened { color: var(--fg-4); }
+/* The body's own card. Same frame as a comment; nothing else sets it apart,
+   because it is not a different kind of thing. */
+.comment.is-body { margin-bottom: 14px; }
 
-/* Indented under its header, so a run of comments reads as a thread rather than
-   as one long page of text. */
 .comment .rendered {
-  padding-left: 23px;
+  padding: 12px;
   font-size: 12.5px;
   color: var(--fg-2);
 }
