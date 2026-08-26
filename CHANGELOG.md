@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.2.1
+
+Reading a conversation in the drawer.
+
+- **Each comment in its own frame.** Indentation was enough while the bodies
+  were a paragraph long; a comment carrying its own headings, quotes and lists
+  ran into the next one's header with no line to stop it.
+- **The body is framed too**, with the author and when they opened it. Left
+  bare it read as a loose paragraph above a list of framed replies.
+- **A heading inside a comment is somebody's heading.** The `CONVERSATION`
+  label's style was reaching into the comment bodies and dressing their `h3`
+  as part of the panel.
+
 ## v0.2.0
 
 Folding, reading and reviewing. The board could show you where the work was;
