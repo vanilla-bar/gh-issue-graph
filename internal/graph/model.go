@@ -14,6 +14,27 @@ type User struct {
 	AvatarURL string `json:"avatarUrl,omitempty"`
 }
 
+// Review states as GitHub reports them on the latest review by each person.
+const (
+	ReviewApproved         = "APPROVED"
+	ReviewChangesRequested = "CHANGES_REQUESTED"
+)
+
+// Reviewer is one voice on a pull request: somebody who has answered, somebody
+// being waited on, or both at once when a re-review has been asked for.
+type Reviewer struct {
+	Login     string `json:"login"`
+	AvatarURL string `json:"avatarUrl,omitempty"`
+	// State is APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED, or empty when
+	// they have not answered yet.
+	State string `json:"state,omitempty"`
+	// Requested means GitHub is waiting on them right now.
+	Requested bool `json:"requested,omitempty"`
+	// IsTeam marks a request sent to a team rather than a person. A team has no
+	// avatar, so the card draws its initial instead.
+	IsTeam bool `json:"isTeam,omitempty"`
+}
+
 // Label is a GitHub issue label.
 type Label struct {
 	Name  string `json:"name"`
@@ -96,10 +117,26 @@ type PullRequest struct {
 	// ReviewRequested means GitHub is waiting on *you* to review it. Kept as a
 	// flag rather than a reason string because graph.describeLinks overwrites
 	// Reasons with the link descriptions once a pull request has any links.
-	ReviewRequested bool        `json:"reviewRequested,omitempty"`
-	CIState         string      `json:"ciState,omitempty"`
-	Links           []IssueLink `json:"links,omitempty"`
-	Relation        string      `json:"relation"`
+	ReviewRequested bool `json:"reviewRequested,omitempty"`
+	// Reviewers is everybody who has answered or is being waited on, in the
+	// order they should be drawn: those still owed a review first.
+	Reviewers []Reviewer `json:"reviewers,omitempty"`
+	// ReviewApproved and ReviewTotal are the "1 of 2" on the card. Total counts
+	// people, not reviews: somebody who approved twice is still one voice.
+	//
+	// Approved is sent even when it is zero. Dropping it left the card reading
+	// "undefined/2" for the case that matters most: nobody has approved yet.
+	ReviewApproved int `json:"reviewApproved"`
+	ReviewTotal    int `json:"reviewTotal,omitempty"`
+	// ReReviewRequested means somebody who already answered has been asked
+	// again — usually because the author pushed after a review.
+	ReReviewRequested bool `json:"reReviewRequested,omitempty"`
+	// ViewerPendingReview means you have a review started and not submitted.
+	// Nobody else can see it, so nothing moves until you press the button.
+	ViewerPendingReview bool        `json:"viewerPendingReview,omitempty"`
+	CIState             string      `json:"ciState,omitempty"`
+	Links               []IssueLink `json:"links,omitempty"`
+	Relation            string      `json:"relation"`
 	// Reasons explains why this pull request is on the canvas.
 	Reasons []string `json:"reasons,omitempty"`
 }

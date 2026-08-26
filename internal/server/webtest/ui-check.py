@@ -353,6 +353,72 @@ def main():
             check("the reverse-looked-up issue says why it was pulled in",
                   "reviewing #" in (review["parentReason"] or ""), str(review["parentReason"]))
 
+        # Review state. The card used to say `review required` and stop there,
+        # which never answered "how far along is it, and who is it waiting on?".
+        review = ws.evaluate("""(() => {
+          const cards = {}
+          for (const card of document.querySelectorAll('#lanes .node.pr')) {
+            const number = card.querySelector('.number').textContent.trim()
+            const count = card.querySelector('.status.ok, .status.warn, .status.bad')
+            cards[number] = {
+              counts: [...card.querySelectorAll('.status')].map((s) => s.textContent.trim()),
+              faces: [...card.querySelectorAll('.reviewers .face')].map((f) => ({
+                cls: f.className.replace('avatar face ', ''),
+                title: f.getAttribute('title'),
+                team: f.classList.contains('team'),
+              })),
+              overflows: card.scrollWidth > card.clientWidth + 1,
+              dots: [...card.querySelectorAll('.status')].filter((s) => {
+                if (!s.querySelector('svg')) return false
+                return getComputedStyle(s, '::before').display !== 'none'
+              }).length,
+            }
+            void count
+          }
+          return cards
+        })()""")
+
+        approved = review.get("PR #210", {})
+        check("a pull request says how many of its reviewers have approved",
+              any("1/2" in text for text in approved.get("counts", [])),
+              json.dumps(approved.get("counts")))
+        check("and shows a face for each of them", len(approved.get("faces", [])) == 2,
+              json.dumps(approved.get("faces")))
+        check("the ring says what each one said",
+              sorted(f["cls"] for f in approved.get("faces", [])) == ["approved", "waiting"],
+              json.dumps([f["cls"] for f in approved.get("faces", [])]))
+        check("hovering a face names them and what they said",
+              all(" — " in (f["title"] or "") for f in approved.get("faces", [])),
+              json.dumps([f["title"] for f in approved.get("faces", [])]))
+
+        # A glyph and a dot in front of it say the same thing twice.
+        check("a status with its own glyph drops the generic dot",
+              all(card["dots"] == 0 for card in review.values()),
+              json.dumps({k: v["dots"] for k, v in review.items() if v["dots"]}))
+
+        rerequested = review.get("PR #220", {})
+        check("a re-review is called out",
+              any("re-review" in text for text in rerequested.get("counts", [])),
+              json.dumps(rerequested.get("counts")))
+        check("the reviewer who asked for changes is marked",
+              [f["cls"] for f in rerequested.get("faces", [])] == ["changes"],
+              json.dumps(rerequested.get("faces")))
+
+        mine = review.get("PR #230", {})
+        check("an unsubmitted review of your own is called out",
+              any("draft review" in text for text in mine.get("counts", [])),
+              json.dumps(mine.get("counts")))
+
+        team = review.get("PR #211", {})
+        check("a team request is drawn without an avatar",
+              any(f["team"] for f in team.get("faces", [])), json.dumps(team.get("faces")))
+        check("and still counts towards the total",
+              any("0/1" in text for text in team.get("counts", [])), json.dumps(team.get("counts")))
+
+        check("no card is pushed wider than the column by the review row",
+              not [n for n, card in review.items() if card["overflows"]],
+              json.dumps([n for n, card in review.items() if card["overflows"]]))
+
         # Turning the scope off has to take the pull request *and* the issue
         # that was fetched only for it away together, and turning it back on has
         # to restore exactly what was there — not merely more than nothing.

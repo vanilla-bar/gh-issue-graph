@@ -1033,6 +1033,44 @@ button.chip[aria-expanded="true"] .caret { transform: rotate(90deg); }
 .status.ok { color: var(--green); }
 .status.warn { color: var(--amber); }
 .status.bad { color: var(--red); }
+.status svg { display: block; width: 11px; height: 11px; }
+/* The dot marks a status that has no glyph of its own. Where there is a glyph —
+   a tick for the approvals, an arrow for a re-review — the dot only doubles it. */
+.status:has(svg)::before { display: none; }
+
+/* The reviewers, as faces. The ring says what each one said, so the row answers
+   "who is this waiting on?" without being read left to right. They overlap by a
+   couple of pixels: four faces then cost the width of three. */
+.reviewers {
+  display: inline-flex;
+  align-items: center;
+  padding-left: 2px;
+}
+.reviewers .face {
+  width: 15px;
+  height: 15px;
+  margin-left: -2px;
+}
+.reviewers .face.approved { box-shadow: 0 0 0 1.5px var(--green); }
+.reviewers .face.changes { box-shadow: 0 0 0 1.5px var(--red); }
+/* Still owed a review: dimmed, so the eye lands on it as the open question
+   rather than as one more answered face. */
+.reviewers .face.waiting { box-shadow: 0 0 0 1px var(--border-2); opacity: .55; }
+.reviewers .face.team {
+  display: grid;
+  place-items: center;
+  font-size: 8.5px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--fg-3);
+  background: var(--surface-3);
+}
+.reviewers .more-faces {
+  margin-left: 3px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--fg-4);
+}
 
 /* ===========================================================================
    Empty state

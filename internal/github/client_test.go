@@ -396,4 +396,90 @@ func TestRawQueryIsScopedToo(t *testing.T) {
 	}
 }
 
+func TestSettledFieldsAskForTheReviewState(t *testing.T) {
+	for _, want := range []string{"reviewRequests(", "latestReviews(", "pendingReviews:reviews("} {
+		if !strings.Contains(ciFields, want) {
+			t.Fatalf("ciFields must request %s; the card cannot say who is owed a review without it", want)
+		}
+	}
+}
+
+func TestApplyReviewStateCountsPeopleNotReviews(t *testing.T) {
+	pr := &graph.PullRequest{}
+	applyReviewState(pr,
+		[]reviewVoice{{login: "mona", state: graph.ReviewApproved}, {login: "hubot", state: "COMMENTED"}},
+		[]reviewVoice{{login: "octocat"}})
+
+	if pr.ReviewApproved != 1 || pr.ReviewTotal != 3 {
+		t.Fatalf("approved/total = %d/%d, want 1/3", pr.ReviewApproved, pr.ReviewTotal)
+	}
+	if pr.ReReviewRequested {
+		t.Fatal("nobody was asked twice, so this is not a re-review")
+	}
+	// A comment is not an approval, and it is not silence either: the reviewer
+	// stays on the card, just without a tick.
+	var commented graph.Reviewer
+	for _, who := range pr.Reviewers {
+		if who.Login == "hubot" {
+			commented = who
+		}
+	}
+	if commented.State != "COMMENTED" {
+		t.Fatalf("hubot's state = %q, want COMMENTED", commented.State)
+	}
+}
+
+// GitHub has no "re-review" field. It shows up as somebody being in both
+// connections at once: they answered, and they are being waited on again.
+func TestApplyReviewStateSpotsAReReview(t *testing.T) {
+	pr := &graph.PullRequest{}
+	applyReviewState(pr,
+		[]reviewVoice{{login: "mona", state: graph.ReviewApproved}},
+		[]reviewVoice{{login: "mona"}})
+
+	if !pr.ReReviewRequested {
+		t.Fatal("mona approved and was asked again; that is a re-review")
+	}
+	if pr.ReviewTotal != 1 {
+		t.Fatalf("total = %d, want 1: the same person in both lists is one voice", pr.ReviewTotal)
+	}
+}
+
+// The card is read to answer "what is this waiting on?", so the people who
+// still owe a review come first.
+func TestApplyReviewStatePutsWhoIsOwedFirst(t *testing.T) {
+	pr := &graph.PullRequest{}
+	applyReviewState(pr,
+		[]reviewVoice{{login: "mona", state: graph.ReviewApproved}},
+		[]reviewVoice{{login: "octocat"}})
+
+	if len(pr.Reviewers) != 2 || pr.Reviewers[0].Login != "octocat" {
+		t.Fatalf("reviewers = %+v, want octocat first", pr.Reviewers)
+	}
+}
+
+// A team request has no login and no avatar, but dropping it would make the
+// count say the pull request is fully reviewed when it is not.
+func TestApplyReviewStateCountsATeam(t *testing.T) {
+	pr := &graph.PullRequest{}
+	applyReviewState(pr,
+		[]reviewVoice{{login: "mona", state: graph.ReviewApproved}},
+		[]reviewVoice{{login: "reviewers", team: true}})
+
+	if pr.ReviewApproved != 1 || pr.ReviewTotal != 2 {
+		t.Fatalf("approved/total = %d/%d, want 1/2", pr.ReviewApproved, pr.ReviewTotal)
+	}
+	if !pr.Reviewers[0].IsTeam {
+		t.Fatalf("reviewers = %+v, want the team marked and waiting", pr.Reviewers)
+	}
+}
+
+func TestApplyReviewStateLeavesAnUnreviewedPullRequestBlank(t *testing.T) {
+	pr := &graph.PullRequest{}
+	applyReviewState(pr, nil, nil)
+	if pr.Reviewers != nil || pr.ReviewTotal != 0 {
+		t.Fatalf("reviewers = %+v, total = %d, want nothing", pr.Reviewers, pr.ReviewTotal)
+	}
+}
+
 var errTest = errors.New("test")

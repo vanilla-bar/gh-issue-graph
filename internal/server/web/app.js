@@ -99,6 +99,9 @@ const ICON = {
   blocked: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.1" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.9 12.1 12.1 3.9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   eye: '<svg viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1.4 8S3.9 3.6 8 3.6 14.6 8 14.6 8 12.1 12.4 8 12.4 1.4 8 1.4 8Z"/><circle cx="8" cy="8" r="2.1"/></g></svg>',
   chevron: '<svg viewBox="0 0 16 16"><path d="M6 3.4 10.6 8 6 12.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  check: '<svg viewBox="0 0 16 16"><path d="M3.2 8.5 6.5 11.8 12.9 4.7" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  rereview: '<svg viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13.2 7.2a5.3 5.3 0 1 1-1.6-3.5"/><path d="M13.4 2.2v3.1h-3.1"/></g></svg>',
+  draftReview: '<svg viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M11.4 2.6a1.6 1.6 0 0 1 2.3 2.3L6.4 12.2l-3 .7.7-3Z"/><path d="M10.2 3.8l2 2"/></g></svg>',
   external: '<svg viewBox="0 0 16 16"><path d="M6.2 3.2H3.4a1 1 0 0 0-1 1v8.4a1 1 0 0 0 1 1h8.4a1 1 0 0 0 1-1V9.8M9.2 2.6h4.2v4.2M13.4 2.6 7.6 8.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 }
 
@@ -936,6 +939,66 @@ function otherRepoHTML(repository, laneRepo) {
   return `<span class="repo">${escapeHTML(repository)}</span>`
 }
 
+// How many reviewer faces fit before the row starts wrapping. Past this the
+// rest become a count, which says the same thing in a third of the width.
+const REVIEWERS_SHOWN = 4
+
+const REVIEW_WORD = {
+  APPROVED: 'approved',
+  CHANGES_REQUESTED: 'requested changes',
+  COMMENTED: 'commented',
+  DISMISSED: 'review dismissed',
+}
+
+// reviewHTML turns the review state into at most three things: how many of the
+// people asked have approved, who they are, and whether anything is waiting on
+// you specifically.
+//
+// The count replaces the old `review required` / `approved` word. It carries
+// that meaning in its colour and says how far along it is as well, which the
+// word never could.
+function reviewHTML(pr) {
+  const out = []
+  const reviewers = pr.reviewers || []
+  if (pr.reviewTotal > 0) {
+    const kind = pr.reviewDecision === 'APPROVED' ? 'ok'
+      : pr.reviewDecision === 'CHANGES_REQUESTED' ? 'bad' : 'warn'
+    const decision = pr.reviewDecision
+      ? pr.reviewDecision.toLowerCase().replace(/_/g, ' ')
+      : 'awaiting review'
+    const title = `${pr.reviewApproved} of ${pr.reviewTotal} approved — ${decision}`
+    out.push(`<span class="status ${kind}" title="${escapeHTML(title)}">${ICON.check}${pr.reviewApproved}/${pr.reviewTotal}</span>`)
+  }
+  if (reviewers.length) {
+    const faces = reviewers.slice(0, REVIEWERS_SHOWN).map((who) => {
+      const state = who.state === 'APPROVED' ? 'approved'
+        : who.state === 'CHANGES_REQUESTED' ? 'changes'
+          : who.requested ? 'waiting' : 'answered'
+      const said = REVIEW_WORD[who.state] || (who.requested ? 'review requested' : 'no review yet')
+      const label = `${who.login} — ${said}${who.requested && who.state ? ', asked again' : ''}`
+      if (who.isTeam || !who.avatarUrl) {
+        // A team has no picture. Its first letter is enough to tell two apart,
+        // and the tooltip carries the name.
+        return `<span class="avatar face team ${state}" title="${escapeHTML(label)}">${escapeHTML(who.login.slice(0, 1).toUpperCase())}</span>`
+      }
+      return `<img class="avatar face ${state}" src="${escapeHTML(who.avatarUrl)}" alt="${escapeHTML(who.login)}" title="${escapeHTML(label)}">`
+    })
+    if (reviewers.length > REVIEWERS_SHOWN) {
+      const rest = reviewers.slice(REVIEWERS_SHOWN).map((who) => who.login).join(', ')
+      faces.push(`<span class="more-faces" title="${escapeHTML(rest)}">+${reviewers.length - REVIEWERS_SHOWN}</span>`)
+    }
+    out.push(`<span class="reviewers">${faces.join('')}</span>`)
+  }
+  if (pr.reReviewRequested) {
+    out.push(`<span class="status warn" title="somebody who already reviewed has been asked again">${ICON.rereview}re-review</span>`)
+  }
+  if (pr.viewerPendingReview) {
+    // Invisible on GitHub until submitted, which is exactly why it earns a mark.
+    out.push(`<span class="status warn" title="you have a review started and not submitted">${ICON.draftReview}draft review</span>`)
+  }
+  return out
+}
+
 function pullRequestHTML(pr, laneRepo) {
   const parts = []
   const state = pr.state === 'MERGED' ? 'merged' : pr.isDraft ? 'draft' : pr.state.toLowerCase()
@@ -961,11 +1024,7 @@ function pullRequestHTML(pr, laneRepo) {
     const kind = pr.ciState === 'SUCCESS' ? 'ok' : pr.ciState === 'FAILURE' || pr.ciState === 'ERROR' ? 'bad' : 'warn'
     meta.push(`<span class="status ${kind}" title="continuous integration: ${escapeHTML(pr.ciState.toLowerCase())}">CI ${escapeHTML(pr.ciState.toLowerCase())}</span>`)
   }
-  if (pr.reviewDecision) {
-    const kind = pr.reviewDecision === 'APPROVED' ? 'ok' : pr.reviewDecision === 'CHANGES_REQUESTED' ? 'bad' : 'warn'
-    const text = pr.reviewDecision.toLowerCase().replace(/_/g, ' ')
-    meta.push(`<span class="status ${kind}" title="review: ${escapeHTML(text)}">${escapeHTML(text)}</span>`)
-  }
+  meta.push(...reviewHTML(pr))
   if (meta.length) parts.push(`<div class="meta">${meta.join('')}</div>`)
   parts.push(reasonsHTML(pr.reasons))
   return parts.join('')
