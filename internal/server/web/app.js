@@ -71,6 +71,11 @@ const fields = {
 // graph is already in memory — so hiding them buys only space.
 const collapsed = new Set()
 
+// Issues whose sub-issues are hidden, along with everything hanging off them.
+// Same shape and lifetime as `collapsed` above: open by default, and dropped on
+// reload rather than stored, so a fold never outlives the board it was made on.
+const foldedSubs = new Set()
+
 // Glyphs. Inline SVG rather than Unicode: the CSP rules out an icon font, and
 // characters like U+26A0 render as a different weight — sometimes as emoji —
 // on every platform. Every glyph is 16x16 and paints in currentColor, so the
@@ -293,12 +298,29 @@ function visibleNodes(data) {
   )
   const issueOfPR = new Map()
   const stackParent = new Map()
+  const subIssues = new Map()
   for (const edge of data.edges) {
     if (edge.kind === 'pr-closes' || edge.kind === 'pr-refs' || edge.kind === 'pr-xref') {
       if (!issueOfPR.has(edge.target)) issueOfPR.set(edge.target, [])
       issueOfPR.get(edge.target).push(edge.source)
     } else if (edge.kind === 'pr-stack') {
       stackParent.set(edge.target, edge.source)
+    } else if (edge.kind === 'parent') {
+      if (!subIssues.has(edge.source)) subIssues.set(edge.source, [])
+      subIssues.get(edge.source).push(edge.target)
+    }
+  }
+
+  // Folding a parent takes its whole subtree, not just the row beneath it:
+  // leaving grandchildren behind would strand them in a column with nothing
+  // pointing at them.
+  const hiddenIssues = new Set()
+  const walk = [...foldedSubs]
+  while (walk.length) {
+    for (const child of subIssues.get(walk.pop()) || []) {
+      if (hiddenIssues.has(child)) continue
+      hiddenIssues.add(child)
+      walk.push(child)
     }
   }
 
@@ -313,7 +335,7 @@ function visibleNodes(data) {
     const repositoryID = node.kind === 'issue' ? node.issue.repositoryId : node.pullRequest.repositoryId
     if (foldedRepoIDs.has(repositoryID)) continue
     if (node.kind !== 'pullRequest') {
-      visible.add(node.id)
+      if (!hiddenIssues.has(node.id)) visible.add(node.id)
       continue
     }
     const owners = issueOfPR.get(node.id)
@@ -322,8 +344,10 @@ function visibleNodes(data) {
       if (!stackParent.has(node.id)) visible.add(node.id)
       continue
     }
-    // Shown unless every issue it belongs to has been closed up.
-    if (owners.some((id) => !collapsed.has(id))) visible.add(node.id)
+    // Shown unless every issue it belongs to has been closed up or folded away
+    // with its parent. A pull request that implements two issues stays for as
+    // long as one of them is still on the canvas and open.
+    if (owners.some((id) => !collapsed.has(id) && !hiddenIssues.has(id))) visible.add(node.id)
   }
   // Stacked pull requests follow whatever they are stacked on.
   for (let pass = 0; pass < data.nodes.length; pass += 1) {
@@ -336,7 +360,7 @@ function visibleNodes(data) {
     }
     if (!changed) break
   }
-  return { visible, byID, issueOfPR }
+  return { visible, byID, issueOfPR, subIssues }
 }
 
 // ------------------------------------------------------------------- rendering
@@ -346,7 +370,7 @@ function visibleNodes(data) {
 let anchorHint = null
 
 function render(data) {
-  const { visible, byID, issueOfPR } = visibleNodes(data)
+  const { visible, byID, issueOfPR, subIssues } = visibleNodes(data)
   const anchor = captureViewport(anchorHint)
   anchorHint = null
 
@@ -358,7 +382,7 @@ function render(data) {
   lanesEl.innerHTML = ''
   positions = new Map()
 
-  const prCounts = countPRs(data, issueOfPR)
+  const counts = { prs: countPRs(data, issueOfPR), subs: countSubIssues(data, subIssues) }
   const lanes = sortLanes(groupIntoLanes(nodes, edges))
 
   for (const lane of lanes) {
@@ -375,7 +399,7 @@ function render(data) {
 
     const laneRepo = lane.repo ? lane.repo.nameWithOwner : ''
     for (const node of lane.nodes) {
-      body.appendChild(createNode(node, prCounts, laneRepo))
+      body.appendChild(createNode(node, counts, laneRepo))
     }
     const size = layoutLane(lane, body)
     body.style.height = `${size.height}px`
@@ -484,6 +508,20 @@ function countPRs(data, issueOfPR) {
       counts.set(issueID, (counts.get(issueID) || 0) + 1)
     }
     void prID
+  }
+  return counts
+}
+
+// countSubIssues counts the children each issue has *on the canvas*, which is
+// not the same number as `subIssuesSummary` reports: a sub-issue in a folded
+// repository, or one the search never reached, is counted by GitHub and not
+// drawn here. The toggle only claims to fold away what can be seen.
+function countSubIssues(data, subIssues) {
+  const counts = new Map()
+  const onCanvas = new Set(data.nodes.map((node) => node.id))
+  for (const [parentID, children] of subIssues) {
+    const drawn = children.filter((id) => onCanvas.has(id)).length
+    if (drawn) counts.set(parentID, drawn)
   }
   return counts
 }
@@ -640,12 +678,12 @@ function layoutLane(lane, laneEl) {
 
 // ------------------------------------------------------------------ node HTML
 
-function createNode(node, prCounts, laneRepo) {
+function createNode(node, counts, laneRepo) {
   const element = document.createElement('article')
   element.dataset.id = node.id
   if (node.kind === 'issue') {
     element.className = `node ${issueClasses(node.issue)}`
-    element.innerHTML = issueHTML(node, prCounts.get(node.id) || 0, laneRepo)
+    element.innerHTML = issueHTML(node, counts.prs.get(node.id) || 0, counts.subs.get(node.id) || 0, laneRepo)
   } else {
     element.className = `node pr ${node.pullRequest.state.toLowerCase()}${node.pullRequest.isDraft ? ' draft' : ''}`
     element.innerHTML = pullRequestHTML(node.pullRequest, laneRepo)
@@ -708,7 +746,7 @@ function labelColour(value) {
   return hex.length === 6 ? hex : 'd0d7de'
 }
 
-function issueHTML(node, prCount, laneRepo) {
+function issueHTML(node, prCount, subCount, laneRepo) {
   const issue = node.issue
   const parts = []
   const closed = issue.state === 'CLOSED'
@@ -746,7 +784,21 @@ function issueHTML(node, prCount, laneRepo) {
     // there?" before you have finished reading the numbers.
     const done = issue.subCompleted >= issue.subTotal
     const percent = Math.round((100 * issue.subCompleted) / issue.subTotal)
-    meta.push(`<span class="chip progress-chip${done ? ' is-done' : ''}" title="${issue.subCompleted} of ${issue.subTotal} sub-issues done"><span class="meter"><i data-fill="${percent}"></i></span>${issue.subCompleted}/${issue.subTotal}</span>`)
+    const classes = `chip progress-chip${done ? ' is-done' : ''}`
+    const body = `<span class="meter"><i data-fill="${percent}"></i></span>${issue.subCompleted}/${issue.subTotal}`
+    const progressTitle = `${issue.subCompleted} of ${issue.subTotal} sub-issues done`
+    if (subCount > 0) {
+      // The same chip doubles as the fold control: it already stands for the
+      // sub-issues, and a second chip beside it would cost a card's width to
+      // say the same word twice.
+      const open = !foldedSubs.has(node.id)
+      const plural = subCount === 1 ? '' : 's'
+      const what = `the ${subCount} sub-issue${plural} drawn below this one`
+      const title = `${progressTitle} — click to ${open ? 'fold away' : 'bring back'} ${what}`
+      meta.push(`<button type="button" class="${classes}" data-toggle-subs="${escapeHTML(node.id)}" aria-expanded="${open}" title="${escapeHTML(title)}"><span class="caret">${ICON.chevron}</span>${body}</button>`)
+    } else {
+      meta.push(`<span class="${classes}" title="${progressTitle}">${body}</span>`)
+    }
   }
   // Both attention reasons say the same thing to the reader — close it — so
   // they share one chip and the tooltip carries whichever applies.
@@ -1066,6 +1118,18 @@ lanesEl.addEventListener('click', (event) => {
     return
   }
 
+  const subs = event.target.closest('[data-toggle-subs]')
+  if (subs) {
+    event.preventDefault()
+    const id = subs.dataset.toggleSubs
+    if (foldedSubs.has(id)) foldedSubs.delete(id)
+    else foldedSubs.add(id)
+    // Hold the parent still; its subtree grows and shrinks below it.
+    anchorHint = id
+    if (sourceData) render(sourceData)
+    return
+  }
+
   const toggle = event.target.closest('[data-toggle]')
   if (!toggle) return
   event.preventDefault()
@@ -1108,6 +1172,11 @@ foldAllButton.addEventListener('click', () => {
 
 unfoldAllButton.addEventListener('click', () => {
   for (const name of everyRepositoryName()) unfolded.add(name)
+  // Unfold means unfold: a subtree folded inside a lane would otherwise stay
+  // shut behind a button that claims to have opened everything. Fold all is
+  // not the mirror of this — it hides the lanes, so what is folded within one
+  // is out of sight anyway and worth keeping for when the lane comes back.
+  foldedSubs.clear()
   storeFolds()
   anchorHint = firstRepositoryNodeID()
   if (sourceData) render(sourceData)
