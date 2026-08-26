@@ -125,6 +125,10 @@ starts folded.
 | Coloured dot on a label | The label's own GitHub colour. The name stays at reading contrast whatever that colour is. |
 | PR card, `merged` / `open` / `draft` / `closed` | The state, as a word and as the colour of the card's left edge. |
 | `👁 review requested` | GitHub is waiting on **you** to review it. Blue, like everything else on a card that is about you rather than about the work. |
+| `✓ 1/2` | How many of the people asked have approved. The colour is GitHub's own decision: green approved, red changes requested, amber still waiting. It counts people, so approving twice is still one voice. |
+| Avatars beside the count | The reviewers. A green ring approved, a red ring asked for changes, a dim one has not answered. Hover for `mona — approved`. A team has no avatar, so its initial is drawn instead; past four, the rest become `+3`. |
+| `↻ re-review` | Somebody who already reviewed has been asked again. |
+| `✎ draft review` | You have a review started and not submitted. On GitHub nobody else can see it. |
 | Bottom line of every card | **Why it is on the canvas**: `assigned to you`, `you opened it`, `sub-issue of #321`, `closes #534`, `refs #325`, `blocks #110`, `your pull request`. |
 | Lane header | Click it to open the repository, or to fold it away again. `↗` opens it on GitHub. |
 | `⌄ 2 PRs` | An issue's pull requests, **shown by default**. Click to fold them away; nothing is re-fetched either way. |

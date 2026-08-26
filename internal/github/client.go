@@ -981,17 +981,94 @@ func (c *Client) loadPullRequests(ctx context.Context, options graph.SearchOptio
 		}
 	}
 
-	if err := c.fillCIState(ctx, kept); err != nil {
+	if err := c.fillReviewAndCI(ctx, viewer, kept); err != nil {
 		return nil, warnings, err
 	}
 	return kept, warnings, nil
 }
 
-// fillCIState fetches the check rollup for the pull requests that made it onto
-// the canvas. Splitting it out of the scan trades one extra round trip for a
-// query that no longer asks GitHub to aggregate checks for every open and
-// merged pull request in every repository.
-func (c *Client) fillCIState(ctx context.Context, prs []*graph.PullRequest) error {
+// reviewVoice is one row of either review connection, flattened so the two can
+// be merged without caring which one it came from.
+type reviewVoice struct {
+	login  string
+	avatar string
+	state  string
+	team   bool
+}
+
+// applyReviewState merges what people have said with who is still being waited
+// on, and fills in the counts the card shows.
+//
+// The two connections overlap on purpose. Somebody who approved and was then
+// asked again appears in both, and that pair is what a re-review *is*: GitHub
+// has no field for it. Counting people rather than reviews keeps a reviewer who
+// approved twice from making the total say 2 of 3.
+func applyReviewState(pr *graph.PullRequest, answered, requested []reviewVoice) {
+	order := []string{}
+	byLogin := map[string]*graph.Reviewer{}
+	add := func(login string) *graph.Reviewer {
+		if existing := byLogin[login]; existing != nil {
+			return existing
+		}
+		byLogin[login] = &graph.Reviewer{Login: login}
+		order = append(order, login)
+		return byLogin[login]
+	}
+
+	for _, voice := range answered {
+		who := add(voice.login)
+		who.State = voice.state
+		if voice.avatar != "" {
+			who.AvatarURL = voice.avatar
+		}
+	}
+	for _, voice := range requested {
+		who := add(voice.login)
+		who.Requested = true
+		who.IsTeam = voice.team
+		if voice.avatar != "" {
+			who.AvatarURL = voice.avatar
+		}
+		if who.State != "" {
+			pr.ReReviewRequested = true
+		}
+	}
+
+	if len(order) == 0 {
+		pr.Reviewers, pr.ReviewApproved, pr.ReviewTotal = nil, 0, 0
+		return
+	}
+
+	// Those still owed a review lead: the card is read to answer "what is this
+	// waiting on?", and a row of green ticks ahead of them buries the answer.
+	sort.SliceStable(order, func(i, j int) bool {
+		left, right := byLogin[order[i]], byLogin[order[j]]
+		if left.Requested != right.Requested {
+			return left.Requested
+		}
+		return false
+	})
+
+	reviewers := make([]graph.Reviewer, 0, len(order))
+	approved := 0
+	for _, login := range order {
+		who := byLogin[login]
+		if who.State == graph.ReviewApproved {
+			approved++
+		}
+		reviewers = append(reviewers, *who)
+	}
+	pr.Reviewers = reviewers
+	pr.ReviewApproved = approved
+	pr.ReviewTotal = len(reviewers)
+}
+
+// fillReviewAndCI fetches the check rollup and the review state for the pull
+// requests that made it onto the canvas. Splitting it out of the scan trades
+// one extra round trip for a query that no longer asks GitHub to aggregate
+// checks, or list reviewers, for every open and merged pull request in every
+// repository.
+func (c *Client) fillReviewAndCI(ctx context.Context, viewer string, prs []*graph.PullRequest) error {
 	byID := make(map[string]*graph.PullRequest, len(prs))
 	ids := make([]string, 0, len(prs))
 	for _, pr := range prs {
@@ -1019,6 +1096,32 @@ func (c *Client) fillCIState(ctx context.Context, prs []*graph.PullRequest) erro
 							} `json:"commit"`
 						} `json:"nodes"`
 					} `json:"commits"`
+					ReviewRequests struct {
+						Nodes []struct {
+							RequestedReviewer *struct {
+								Typename  string `json:"__typename"`
+								Login     string `json:"login"`
+								AvatarURL string `json:"avatarUrl"`
+								Slug      string `json:"slug"`
+							} `json:"requestedReviewer"`
+						} `json:"nodes"`
+					} `json:"reviewRequests"`
+					LatestReviews struct {
+						Nodes []struct {
+							State  string `json:"state"`
+							Author *struct {
+								Login     string `json:"login"`
+								AvatarURL string `json:"avatarUrl"`
+							} `json:"author"`
+						} `json:"nodes"`
+					} `json:"latestReviews"`
+					PendingReviews struct {
+						Nodes []struct {
+							Author *struct {
+								Login string `json:"login"`
+							} `json:"author"`
+						} `json:"nodes"`
+					} `json:"pendingReviews"`
 				} `json:"nodes"`
 			} `json:"data"`
 		}
@@ -1027,11 +1130,45 @@ func (c *Client) fillCIState(ctx context.Context, prs []*graph.PullRequest) erro
 		}
 		for _, node := range payload.Data.Nodes {
 			pr := byID[node.ID]
-			if pr == nil || len(node.Commits.Nodes) == 0 {
+			if pr == nil {
 				continue
 			}
-			if rollup := node.Commits.Nodes[0].Commit.StatusCheckRollup; rollup != nil {
-				pr.CIState = rollup.State
+			if len(node.Commits.Nodes) > 0 {
+				if rollup := node.Commits.Nodes[0].Commit.StatusCheckRollup; rollup != nil {
+					pr.CIState = rollup.State
+				}
+			}
+			answered := make([]reviewVoice, 0, len(node.LatestReviews.Nodes))
+			for _, review := range node.LatestReviews.Nodes {
+				if review.Author == nil || review.Author.Login == "" {
+					continue
+				}
+				answered = append(answered, reviewVoice{
+					login: review.Author.Login, avatar: review.Author.AvatarURL, state: review.State,
+				})
+			}
+			requested := make([]reviewVoice, 0, len(node.ReviewRequests.Nodes))
+			for _, request := range node.ReviewRequests.Nodes {
+				who := request.RequestedReviewer
+				if who == nil {
+					continue
+				}
+				if who.Typename == "Team" {
+					if who.Slug != "" {
+						requested = append(requested, reviewVoice{login: who.Slug, team: true})
+					}
+					continue
+				}
+				if who.Login != "" {
+					requested = append(requested, reviewVoice{login: who.Login, avatar: who.AvatarURL})
+				}
+			}
+			applyReviewState(pr, answered, requested)
+			for _, review := range node.PendingReviews.Nodes {
+				if review.Author != nil && review.Author.Login == viewer {
+					pr.ViewerPendingReview = true
+					break
+				}
 			}
 		}
 		return nil
@@ -1413,7 +1550,7 @@ func (r rawPullRequest) convert() *graph.PullRequest {
 	if r.HeadRepository != nil {
 		pr.HeadRepositoryID = r.HeadRepository.ID
 	}
-	// CIState is filled in later by fillCIState: the check rollup is too
+	// CIState is filled in later by fillReviewAndCI: the check rollup is too
 	// expensive to ask for on every pull request the scan looks at.
 	return pr
 }
@@ -1444,13 +1581,24 @@ const prFields = `
   closingIssuesReferences(first:10){nodes{id number repository{nameWithOwner}}}
 `
 
-// statusCheckRollup aggregates every check run on the head commit, and it is
-// the most expensive thing GitHub was being asked for here: the per-repository
-// scan pulled it for 60 pull requests each, then threw most of them away. It is
-// fetched separately, for the handful that survive.
+// What is asked for once the canvas is settled, for the handful of pull
+// requests that made it. statusCheckRollup aggregates every check run on the
+// head commit and is the most expensive thing GitHub is asked for here: the
+// per-repository scan pulled it for 60 pull requests each, then threw most of
+// them away. The review connections ride along in the same request rather than
+// costing a round trip of their own.
+//
+// pendingReviews is the viewer's own unsubmitted review. It is invisible to
+// everybody else, which is exactly why it is worth a mark on the card.
 const ciFields = `
   id
   commits(last:1){nodes{commit{statusCheckRollup{state}}}}
+  reviewRequests(first:10){nodes{requestedReviewer{__typename
+    ...on User{login avatarUrl}
+    ...on Bot{login avatarUrl}
+    ...on Team{slug}}}}
+  latestReviews(first:20){nodes{state author{login avatarUrl}}}
+  pendingReviews:reviews(first:10,states:[PENDING]){nodes{author{login}}}
 `
 
 const xrefFields = `
