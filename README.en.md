@@ -24,8 +24,10 @@ each one draws.
 
 `gh-pr-graph` draws the branch axis: pull requests and the branches they are
 stacked on. If you work in stacked branches, that is the tool you want.
-`gh-issue-graph` does not model branch topology; it draws a stacked pull
-request only when it hangs off an issue already on the canvas.
+`gh-issue-graph` does not make branch topology the trunk. It still draws a line
+between two pull requests when one's base is the other's head, including between
+pull requests that hang off no issue at all. The one pair it skips is where
+either side is the repository's default branch.
 
 `gh-issue-graph` draws the issue axis. I mostly track my work by issue rather
 than by pull request, and I wanted to see the issues a pull request belongs
@@ -90,6 +92,14 @@ Issues you did not match can still appear: a parent, a child, a blocker or the
 subject of a review request gets pulled in so the tree is not cut in half. Those
 are drawn with a dashed border and say `for context`.
 
+### Limits
+
+The graph stops at 500 issues, at 20 repositories scanned for pull requests, and
+at 20 rounds of hierarchy expansion. A warning appears at the top of the page
+when any of them is reached. Narrowing the scopes, or naming a repository with
+`-repo`, keeps the graph under the caps — and `-repo` means only that one
+repository is scanned.
+
 ### Repository lanes
 
 Each repository is a lane. Lanes are ordered by most recent activity by
@@ -108,7 +118,7 @@ so you land back where you were after a reload.
 | No left edge | Somebody else's |
 | Dashed border, `for context` | Pulled in only to complete a relation; nobody asked for it |
 | ⊙ | Open |
-| ▶ green, `ready` | **Ready to pick up**: open, unblocked, no unfinished children. Only shown when something else in the graph *is* blocked, otherwise the badge says nothing. |
+| ▶ green, `ready` | **Ready to pick up**: open, unblocked, no unfinished children, no `wrap up` badge, not a duplicate, and yours — assigned to you or opened by you. Only shown when something else in the graph *is* blocked, otherwise the badge says nothing. |
 | ✓ purple, faded card | Closed |
 | ⚠ `wrap up` | **Needs wrapping up**: every sub-issue is done but the issue is still open, or a pull request was merged and it never closed. |
 | ⊘ `1 blocker` | Waiting on another issue. |
@@ -146,15 +156,20 @@ Links are collected in three layers, plus a fourth that is off by default:
 |---|---|---|
 | 1 | `closingIssuesReferences` | Solid |
 | 2 | `refs #N` in the body | Dashed |
-| 3 | A bare `#N` in the title — `feat(parse): #603 ...` | Dashed |
+| 3 | A bare `#N` in the title — `feat(parse): #603 ...` | Faint dotted |
 | 4 | Timeline cross references | Faint dotted, `xrefs` only |
 
 Layer 3 only trusts a number whose issue is already on the canvas, so a stray
 `#5` in a title cannot create a link. Each card shows which layer its link came
 from.
 
-A pull request that implements nothing on the canvas is shown only when it is
-your own open work.
+GitHub only fills `closingIssuesReferences` for pull requests that target the
+default branch. A pull request aimed at another branch — `dev`, say — can say
+`Closes #123` and still produce no layer 1 link; a `refs #123` line makes it
+layer 2 instead.
+
+A pull request that implements nothing on the canvas stays on it only when it is
+your own open work, or when it is waiting on your review.
 
 Layer 2 is a convention, not an API. The default pattern matches
 `refs #123`, `Refs: #12, #34`, `ref #8` at the start of a line:
