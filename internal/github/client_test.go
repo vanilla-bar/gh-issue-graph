@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/vanilla-bar/gh-issue-graph/internal/graph"
 )
@@ -479,6 +481,64 @@ func TestApplyReviewStateLeavesAnUnreviewedPullRequestBlank(t *testing.T) {
 	applyReviewState(pr, nil, nil)
 	if pr.Reviewers != nil || pr.ReviewTotal != 0 {
 		t.Fatalf("reviewers = %+v, total = %d, want nothing", pr.Reviewers, pr.ReviewTotal)
+	}
+}
+
+func TestDetailQueryAsksForTheConversation(t *testing.T) {
+	for _, want := range []string{"comments(last:", "reviews(last:", "bodyHTML"} {
+		if !strings.Contains(detailQuery, want) {
+			t.Fatalf("the detail query is missing %q", want)
+		}
+	}
+	if strings.Contains(detailQuery, "path line") {
+		t.Fatal("line comments are deliberately not fetched; they multiply the node count")
+	}
+}
+
+// An approval with nothing written on it is already counted on the card. Here
+// it would be a row saying somebody's name and nothing else.
+func TestTailOfConversationIsSortedOldestFirst(t *testing.T) {
+	base := time.Date(2026, 8, 26, 9, 0, 0, 0, time.UTC)
+	said := []graph.Comment{
+		{Author: graph.User{Login: "mona"}, BodyHTML: "<p>third</p>", CreatedAt: base.Add(2 * time.Hour)},
+		{Author: graph.User{Login: "hubot"}, BodyHTML: "<p>first</p>", CreatedAt: base},
+		{Author: graph.User{Login: "octocat"}, BodyHTML: "<p>second</p>", CreatedAt: base.Add(time.Hour)},
+	}
+	got := tailOfConversation(said)
+	if len(got) != 3 {
+		t.Fatalf("kept %d, want 3", len(got))
+	}
+	for i, want := range []string{"hubot", "octocat", "mona"} {
+		if got[i].Author.Login != want {
+			t.Fatalf("position %d = %q, want %q", i, got[i].Author.Login, want)
+		}
+	}
+}
+
+// The tail, not the head: what was said last is what says whether something is
+// stuck. The opening of a long thread is usually the body, fetched in full.
+func TestTailOfConversationKeepsTheEnd(t *testing.T) {
+	base := time.Date(2026, 8, 26, 9, 0, 0, 0, time.UTC)
+	said := make([]graph.Comment, 0, 25)
+	for i := 0; i < 25; i++ {
+		said = append(said, graph.Comment{
+			Author:    graph.User{Login: "hubot"},
+			BodyHTML:  "<p>" + strconv.Itoa(i) + "</p>",
+			CreatedAt: base.Add(time.Duration(i) * time.Minute),
+		})
+	}
+	got := tailOfConversation(said)
+	if len(got) != 20 {
+		t.Fatalf("kept %d, want 20", len(got))
+	}
+	if got[0].BodyHTML != "<p>5</p>" || got[19].BodyHTML != "<p>24</p>" {
+		t.Fatalf("kept %s .. %s, want the last twenty", got[0].BodyHTML, got[19].BodyHTML)
+	}
+}
+
+func TestTailOfConversationIsNilWhenNothingWasSaid(t *testing.T) {
+	if got := tailOfConversation(nil); got != nil {
+		t.Fatalf("got %v, want nil so the drawer drops the section entirely", got)
 	}
 }
 

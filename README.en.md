@@ -145,9 +145,17 @@ the right with the body in it. `✕`, Escape, or a click outside closes it.
 
 The body is GitHub's own HTML, fetched one issue or pull request at a time and
 only when you open one; what you have already read is not fetched again until
-you reload. The column beside it lists the assignees, labels, type and milestone
-along with the parents, children, blockers and linked pull requests — all of it
-from the first load, so nothing extra is requested for it.
+you reload.
+
+The conversation follows it: the last twenty comments, along with any review
+that said something, marked `approved` or `requested changes`. Anything older
+than that is counted rather than dropped silently. A review that approved
+without a word is left out — it is already in the count on the card.
+
+The column beside it lists the assignees, labels, type and milestone, the
+reviewers and where each one stands for a pull request, and the parents,
+children, blockers and linked pull requests. All of it comes from the first
+load, so nothing extra is requested for it.
 
 ### Edges
 

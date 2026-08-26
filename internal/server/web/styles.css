@@ -1442,32 +1442,32 @@ a.drawer-chip:hover { border-color: var(--border-2); color: var(--fg-2); }
 /* The body arrives as GitHub's own HTML. The CSP drops its style attributes and
    this page carries none of GitHub's classes, so the structure lands bare and
    every element it can contain is given a shape here. */
-#drawer-markdown > :first-child { margin-top: 0; }
-#drawer-markdown h1, #drawer-markdown h2, #drawer-markdown h3,
-#drawer-markdown h4, #drawer-markdown h5, #drawer-markdown h6 {
+.rendered > :first-child { margin-top: 0; }
+.rendered h1, .rendered h2, .rendered h3,
+.rendered h4, .rendered h5, .rendered h6 {
   margin: 22px 0 8px;
   font-weight: 640;
   line-height: 1.35;
   letter-spacing: -0.008em;
   color: var(--fg);
 }
-#drawer-markdown h1 { font-size: 17px; }
-#drawer-markdown h2 { font-size: 15.5px; }
-#drawer-markdown h3 { font-size: 14px; }
-#drawer-markdown h4, #drawer-markdown h5, #drawer-markdown h6 { font-size: 13px; }
-#drawer-markdown p { margin: 0 0 11px; }
-#drawer-markdown ul, #drawer-markdown ol { margin: 0 0 11px; padding-left: 22px; }
-#drawer-markdown li { margin-bottom: 4px; }
-#drawer-markdown a { text-decoration: none; }
-#drawer-markdown a:hover { text-decoration: underline; }
-#drawer-markdown code {
+.rendered h1 { font-size: 17px; }
+.rendered h2 { font-size: 15.5px; }
+.rendered h3 { font-size: 14px; }
+.rendered h4, .rendered h5, .rendered h6 { font-size: 13px; }
+.rendered p { margin: 0 0 11px; }
+.rendered ul, .rendered ol { margin: 0 0 11px; padding-left: 22px; }
+.rendered li { margin-bottom: 4px; }
+.rendered a { text-decoration: none; }
+.rendered a:hover { text-decoration: underline; }
+.rendered code {
   padding: 1px 5px;
   border-radius: 5px;
   background: var(--surface-2);
   font-family: var(--mono);
   font-size: 11.5px;
 }
-#drawer-markdown pre {
+.rendered pre {
   margin: 0 0 12px;
   padding: 11px 13px;
   border: 1px solid var(--border);
@@ -1475,14 +1475,14 @@ a.drawer-chip:hover { border-color: var(--border-2); color: var(--fg-2); }
   background: var(--surface-2);
   overflow-x: auto;
 }
-#drawer-markdown pre code { padding: 0; background: none; font-size: 11.5px; line-height: 1.55; }
-#drawer-markdown blockquote {
+.rendered pre code { padding: 0; background: none; font-size: 11.5px; line-height: 1.55; }
+.rendered blockquote {
   margin: 0 0 12px;
   padding: 2px 0 2px 12px;
   border-left: 3px solid var(--border-2);
   color: var(--fg-3);
 }
-#drawer-markdown table {
+.rendered table {
   margin: 0 0 12px;
   border-collapse: collapse;
   font-size: 12px;
@@ -1491,12 +1491,80 @@ a.drawer-chip:hover { border-color: var(--border-2); color: var(--fg-2); }
   max-width: 100%;
   overflow-x: auto;
 }
-#drawer-markdown th, #drawer-markdown td {
+.rendered th, .rendered td {
   padding: 5px 10px;
   border: 1px solid var(--border);
   text-align: left;
 }
-#drawer-markdown th { background: var(--surface-2); font-weight: 600; color: var(--fg-2); }
-#drawer-markdown img { max-width: 100%; border-radius: var(--radius-card); }
-#drawer-markdown hr { margin: 18px 0; border: 0; border-top: 1px solid var(--border); }
-#drawer-markdown input[type="checkbox"] { margin-right: 6px; }
+.rendered th { background: var(--surface-2); font-weight: 600; color: var(--fg-2); }
+.rendered img { max-width: 100%; border-radius: var(--radius-card); }
+.rendered hr { margin: 18px 0; border: 0; border-top: 1px solid var(--border); }
+.rendered input[type="checkbox"] { margin-right: 6px; }
+
+/* The reviewers in the side column: a face, a name and what they said. The card
+   has the same people as rings on avatars; here there is room to name them. */
+.reviewers-list li { align-items: flex-start; }
+.reviewers-list .who { display: flex; flex-direction: column; line-height: 1.35; }
+.reviewers-list .login { color: var(--fg-2); }
+.reviewers-list .said { font-size: 10.5px; color: var(--fg-4); }
+.side-people .avatar.face.team {
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--fg-3);
+  background: var(--surface-3);
+}
+
+/* The conversation, under the body. Set apart by a rule rather than a box: it
+   is the same document continuing, not a different kind of thing. */
+.conversation {
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.conversation h3 {
+  margin: 0 0 12px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+}
+
+.more-said { margin-bottom: 14px; color: var(--fg-4); }
+
+.comment { margin-bottom: 18px; }
+.comment:last-child { margin-bottom: 0; }
+
+.comment header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 11.5px;
+}
+.comment .login { font-weight: 600; color: var(--fg-2); }
+.comment .said {
+  padding: 0 6px;
+  border-radius: var(--radius-chip);
+  font-size: 10.5px;
+  font-weight: 500;
+  background: var(--surface-2);
+}
+.comment .said.ok { background: var(--green-soft); color: var(--green); }
+.comment .said.bad { background: var(--red-soft); color: var(--red); }
+.comment .said.warn { background: var(--amber-soft); color: var(--amber); }
+.comment .when { margin-left: auto; color: var(--fg-4); }
+
+/* Indented under its header, so a run of comments reads as a thread rather than
+   as one long page of text. */
+.comment .rendered {
+  padding-left: 23px;
+  font-size: 12.5px;
+  color: var(--fg-2);
+}
+.comment .rendered > :last-child { margin-bottom: 0; }

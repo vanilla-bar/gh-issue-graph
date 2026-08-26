@@ -802,13 +802,18 @@ def main():
         # The reading panel. A card's body is not on the board — it is fetched
         # when somebody opens it — so this is the one part of the UI that talks
         # to the server after the first load.
+        # Bring the card into view before measuring it: by this point the board
+        # has been panned, folded and reloaded, and a click at a coordinate off
+        # the screen lands on nothing.
         def card_point(number):
             return ws.evaluate("""(() => {
               const card = [...document.querySelectorAll('#lanes .node')]
                 .find((n) => n.querySelector('.number').textContent.trim() === %s)
               if (!card) return null
+              card.scrollIntoView({ block: 'center', inline: 'center' })
               const reasons = card.querySelector('.reasons')
               const r = (reasons || card).getBoundingClientRect()
+              if (r.top < 140 || r.bottom > window.innerHeight - 140) return null
               return { x: r.left + r.width - 24, y: r.top + r.height / 2, id: card.dataset.id }
             })()""" % json.dumps(number))
 
@@ -825,6 +830,17 @@ def main():
                   .map((h) => h.textContent),
                 side: [...document.querySelectorAll('#drawer-side .side-block h3')].map((h) => h.textContent),
                 scrimShown: !scrim.hidden,
+                comments: [...document.querySelectorAll('.comment')].map((c) => ({
+                  who: (c.querySelector('.login') || {}).textContent,
+                  said: (c.querySelector('.said') || {}).textContent || null,
+                  when: (c.querySelector('.when') || {}).textContent,
+                  body: (c.querySelector('.rendered') || {}).textContent.trim().slice(0, 30),
+                })),
+                more: (document.querySelector('.more-said') || {}).textContent || null,
+                reviewers: [...document.querySelectorAll('.reviewers-list li')].map((li) => ({
+                  login: li.querySelector('.login').textContent,
+                  said: li.querySelector('.said').textContent,
+                })),
                 // The state pill, the number and the repository belong on one
                 // row. `PR #210` wrapping was the header pretending it was
                 // short of room in a panel 880px wide.
@@ -841,6 +857,15 @@ def main():
 
         ws.evaluate("window.__fetches = []; (() => { const real = window.fetch;"
                     " window.fetch = (...args) => { window.__fetches.push(String(args[0])); return real(...args) } })()")
+
+        # The tuck checks above left #120 folded into a line, and a tucked card
+        # takes its pull requests off the board with it. Open it back up, or
+        # there is no pull request here to read.
+        ws.evaluate("for (const t of document.querySelectorAll('.node.tucked .tuck')) t.click()")
+        time.sleep(0.8)
+        check("the board is whole again before the drawer is tried",
+              ws.evaluate("document.querySelectorAll('.node.tucked').length") == 0,
+              f"{ws.evaluate('document.querySelectorAll(\'.node.tucked\').length')} still tucked")
 
         point = card_point("#100")
         check("a card with a body to read is on the board", bool(point), json.dumps(point))
@@ -903,6 +928,44 @@ def main():
                   pr_open["shown"] and pr_open["number"] == "PR #210", json.dumps(pr_open))
             check("and lists the issue it implements", "Implements" in pr_open["side"],
                   json.dumps(pr_open["side"]))
+
+            # Who is looking at it, and what they said. The card has the same
+            # people as rings on avatars; here they are named.
+            check("the reviewers are named beside the body",
+                  [r["login"] for r in pr_open["reviewers"]] == ["hubot", "mona"],
+                  json.dumps(pr_open["reviewers"]))
+            check("each one says where they stand",
+                  [r["said"] for r in pr_open["reviewers"]] == ["review requested", "approved"],
+                  json.dumps([r["said"] for r in pr_open["reviewers"]]))
+            check("the heading carries the approval count",
+                  any(h.startswith("Reviewers") and "1/2" in h for h in pr_open["side"]),
+                  json.dumps(pr_open["side"]))
+
+            # The conversation, oldest first, with reviews wearing their state.
+            check("the conversation is under the body", len(pr_open["comments"]) == 3,
+                  json.dumps(pr_open["comments"]))
+            check("it runs oldest first",
+                  [c["who"] for c in pr_open["comments"]] == ["mona", "octocat", "mona"],
+                  json.dumps([c["who"] for c in pr_open["comments"]]))
+            check("a review says what it decided",
+                  [c["said"] for c in pr_open["comments"]] == ["requested changes", None, "approved"],
+                  json.dumps([c["said"] for c in pr_open["comments"]]))
+            # A thread cut short without saying so reads as the whole thing.
+            check("what was left out is admitted to",
+                  pr_open["more"] is not None and "4 earlier" in pr_open["more"],
+                  str(pr_open["more"]))
+            ws.evaluate("document.getElementById('drawer-close').click()")
+            time.sleep(0.4)
+
+        # An issue nobody has commented on drops the section rather than
+        # showing an empty heading.
+        quiet = card_point("#110")
+        if quiet:
+            click(ws, quiet["x"], quiet["y"], settle=1.2)
+            silent = drawer_state()
+            check("a card with no conversation shows no conversation",
+                  len(silent["comments"]) == 0 and silent["more"] is None,
+                  json.dumps({"comments": silent["comments"], "more": silent["more"]}))
             ws.evaluate("document.getElementById('drawer-close').click()")
             time.sleep(0.4)
 

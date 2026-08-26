@@ -38,10 +38,51 @@ func user(login string) graph.User {
 // here, and cover what the drawer has to lay out: headings, a list, a table,
 // code and a quote.
 func (l *Loader) Detail(ctx context.Context, id string) (graph.Detail, error) {
-	if body, ok := demoBodies[id]; ok {
-		return graph.Detail{ID: id, BodyHTML: body}, nil
+	body, ok := demoBodies[id]
+	if !ok {
+		body = "<p><em>No description provided.</em></p>"
 	}
-	return graph.Detail{ID: id, BodyHTML: "<p><em>No description provided.</em></p>"}, nil
+	said := demoComments(l.started, id)
+	return graph.Detail{ID: id, BodyHTML: body, Comments: said, CommentTotal: demoTotals(id, len(said))}, nil
+}
+
+// demoComments covers what the panel has to lay out: an ordinary comment, a
+// review that asked for changes, and a reply to it.
+func demoComments(now time.Time, id string) []graph.Comment {
+	ago := func(h int) time.Time { return now.Add(-time.Duration(h) * time.Hour) }
+	switch id {
+	case "PR_210":
+		return []graph.Comment{
+			{Author: user("mona"), CreatedAt: ago(20), ReviewState: graph.ReviewChangesRequested,
+				BodyHTML: `<p>The parser reads the whole file into memory. For the sizes we expect that is
+fine, but it is worth a note in the code so nobody is surprised later.</p>`},
+			{Author: user(viewer), CreatedAt: ago(19),
+				BodyHTML: `<p>Added the note, and a guard at 8 MB that falls back to streaming.</p>`},
+			{Author: user("mona"), CreatedAt: ago(18), ReviewState: graph.ReviewApproved,
+				BodyHTML: `<p>Reads well now. Thanks.</p>`},
+		}
+	case "PR_220":
+		return []graph.Comment{
+			{Author: user("mona"), CreatedAt: ago(6), ReviewState: graph.ReviewChangesRequested,
+				BodyHTML: `<p>The checklist still tells people to run the old script. That step should go.</p>`},
+		}
+	case "I_100":
+		return []graph.Comment{
+			{Author: user("hubot"), CreatedAt: ago(30),
+				BodyHTML: `<p>Does this change the export format? Anything reading the old shape will need a version bump.</p>`},
+			{Author: user(viewer), CreatedAt: ago(29),
+				BodyHTML: `<p>It does. The exporter writes <code>schema: 2</code> and the importer reads both.</p>`},
+		}
+	}
+	return nil
+}
+
+// A fixed extra so the "and N more" line has something to say in the demo.
+func demoTotals(id string, kept int) int {
+	if id == "PR_210" {
+		return kept + 4
+	}
+	return kept
 }
 
 // The fixture's bodies, as GitHub would render them: plain HTML with no style
