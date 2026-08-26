@@ -757,8 +757,10 @@ header#topbar {
    line: a long owner/name would otherwise be the tallest thing on the card. */
 .node .repo {
   margin-left: auto;
-  /* Room for the tuck control pinned to the corner above it. */
-  padding-right: 18px;
+  /* Room for the tuck control pinned to the corner above it. Margin, not
+     padding: padding is inside the box, so the name would still run under
+     the button and only its text would move. */
+  margin-right: 18px;
   color: var(--fg-4);
   white-space: nowrap;
   overflow: hidden;
@@ -1157,6 +1159,12 @@ button.chip[aria-expanded="true"] .caret { transform: rotate(90deg); }
   font-weight: 500;
   font-style: italic;
 }
+
+/* Clear of the tuck control pinned to the corner, but only when it is the last
+   thing in the row: with a repository name after it that one is at the edge
+   instead and carries the gap itself. The tuck button is always the final
+   child, which is why this counts from the end. */
+.node .top > .flag.context:nth-last-child(2) { margin-right: 18px; }
 
 .flag.context + .repo { margin-left: 6px; }
 

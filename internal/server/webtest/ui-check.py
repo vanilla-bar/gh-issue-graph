@@ -632,6 +632,28 @@ def main():
             tuckX: bb.left + bb.width / 2, tuckY: bb.top + bb.height / 2,
           }
         })()"""
+        # The control is pinned to the corner, so anything the row pushes to its
+        # right edge lands underneath it. `for context` does exactly that.
+        overlap = ws.evaluate("""(() => {
+          const bad = []
+          for (const card of document.querySelectorAll('#lanes .node:not(.pr)')) {
+            const button = card.querySelector('.tuck')
+            if (!button) continue
+            const b = button.getBoundingClientRect()
+            for (const el of card.querySelectorAll('.top > *:not(.tuck)')) {
+              const r = el.getBoundingClientRect()
+              if (!r.width) continue
+              if (r.right > b.left && r.left < b.right && r.bottom > b.top && r.top < b.bottom) {
+                bad.push({ card: card.querySelector('.number').textContent.trim(),
+                           on: el.className, text: el.textContent.trim().slice(0, 24) })
+              }
+            }
+          }
+          return bad
+        })()""")
+        check("the tuck control sits clear of everything in the row",
+              not overlap, json.dumps(overlap))
+
         resting = ws.evaluate(tuck_card)
         check("an issue card carries a tuck control", bool(resting), json.dumps(resting))
         if resting:
