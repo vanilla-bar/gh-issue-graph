@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gh issue-graph</title>
+<link rel="icon" href="logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header id="topbar">
+  <div class="brand" id="brand">
+    <img src="logo.svg" alt="" width="20" height="20">
+    <span>issue-graph</span>
+  </div>
+
+  <form id="controls" autocomplete="off">
+    <!-- Where to look and what to look for are one thought, so they are one
+         control with a seam down the middle rather than two boxes. -->
+    <div class="field-group">
+      <input type="text" id="repo" name="repo" placeholder="owner/repo — blank for everything you touch" aria-label="Repository">
+      <span class="seam" aria-hidden="true"></span>
+      <input type="text" class="q" id="q" name="q" placeholder="extra search query" aria-label="Search query">
+    </div>
+
+    <!-- Five independent toggles, as before. Pressed reads as pressed, so the
+         current scope is legible without counting ticks. -->
+    <div class="segmented" role="group" aria-label="Which issues to collect">
+      <label class="pill" title="Issues assigned to you"><input type="checkbox" id="assigned" checked><span>assigned</span></label>
+      <label class="pill" title="Issues you opened"><input type="checkbox" id="authored" checked><span>authored</span></label>
+      <label class="pill" title="Issues that mention you. Untick all three, with a repository named, to see the whole repository."><input type="checkbox" id="mentioned" checked><span>mentioned</span></label>
+      <label class="pill" title="Include issues that are already closed"><input type="checkbox" id="closed"><span>closed</span></label>
+      <label class="pill" title="Also draw loose cross references. Noisy."><input type="checkbox" id="xref"><span>xrefs</span></label>
+      <!-- The one scope that searches pull requests rather than issues. What is
+           waiting on your review is your work, but it is somebody else's pull
+           request, so no issue search returns it; the issues it points at are
+           reverse-looked-up so it hangs under real work. -->
+      <label class="pill pill-review" title="Open pull requests waiting on your review. The issues they reference are pulled in with them."><input type="checkbox" id="review" checked><span>to review</span></label>
+    </div>
+
+    <button type="submit" id="reload" class="icon-button" title="Reload now" aria-label="Reload now">
+      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M13.4 8a5.4 5.4 0 1 1-1.6-3.8M13.6 2.4v3.2h-3.2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+  </form>
+
+  <div class="lane-controls">
+    <label class="toggle-pill" title="Keep refreshing in the background"><input type="checkbox" id="auto" checked><i class="dot-live" aria-hidden="true"></i><span>auto</span></label>
+    <label class="select-wrap" for="sort">sort
+      <select id="sort" aria-label="Repository order">
+        <option value="recent">recently updated</option>
+        <option value="name">name</option>
+        <option value="open">open issues</option>
+      </select>
+    </label>
+    <div class="button-group">
+      <button type="button" id="fold-all" title="Fold every repository">fold all</button>
+      <button type="button" id="unfold-all" title="Unfold every repository">unfold all</button>
+    </div>
+  </div>
+</header>
+
+<div id="progress" hidden>
+  <div id="progress-bar"></div>
+  <span id="progress-text"></span>
+</div>
+
+<div id="warnings" hidden></div>
+
+<main id="viewport">
+  <div id="canvas">
+    <svg id="edges" aria-hidden="true"></svg>
+    <div id="lanes"></div>
+  </div>
+</main>
+
+<div id="empty" hidden>
+  <div class="box">
+    <svg class="glyph" viewBox="0 0 48 48" width="40" height="40" aria-hidden="true">
+      <circle cx="10" cy="24" r="5" fill="none" stroke="currentColor" stroke-width="2"/>
+      <circle cx="34" cy="13" r="4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="3 3"/>
+      <circle cx="34" cy="35" r="4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="3 3"/>
+      <path d="M15 24h6M21 24c4 0 4-11 8.5-11M21 24c4 0 4 11 8.5 11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 4"/>
+    </svg>
+    <h2>Nothing matched</h2>
+    <p>Clear the repository filter, widen the scope, or switch <code>closed</code> on to bring finished work back in.</p>
+  </div>
+</div>
+
+<!-- Every one of these is also written out on the thing itself: the green glyph
+     sits next to the word "ready", the lines carry their own labels, and each
+     card ends with the reason it is on screen. This row is a reminder, not the
+     key you have to learn first. -->
+<footer id="legend">
+  <div class="legend-group">
+    <span class="key"><i class="swatch rail rail-assigned"></i>assigned to you</span>
+    <span class="key"><i class="swatch rail rail-mine"></i>you opened it</span>
+    <span class="key"><i class="swatch"></i>someone else</span>
+    <span class="key"><i class="swatch complement"></i>pulled in for context</span>
+  </div>
+  <div class="legend-group">
+    <span class="key"><svg class="ready" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6.6 5.1 11.1 8l-4.5 2.9Z" fill="currentColor"/></svg>ready to pick up</span>
+    <span class="key"><svg class="attention" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.2 14.8 13.8H1.2Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8 6.6v3.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="11.7" r=".95" fill="currentColor"/></svg>needs wrapping up</span>
+    <span class="key"><svg class="blocked-glyph" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.1" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.9 12.1 12.1 3.9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>blocked</span>
+  </div>
+  <div class="legend-group">
+    <span class="key"><i class="line parent"></i>sub-issue</span>
+    <span class="key"><i class="line"></i>closes</span>
+    <!-- "stays open" is the whole distinction this tool draws, and the edge
+         label can only fit one word. It has to be said here. -->
+    <span class="key"><i class="line refs"></i>refs&nbsp;— stays open</span>
+    <span class="key"><i class="line mentions"></i>mentions&nbsp;— a guess</span>
+  </div>
+</footer>
+
+<script src="refresh.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

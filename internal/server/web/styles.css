@@ -1,0 +1,1122 @@
+/* ============================================================================
+   gh issue-graph — visual system
+   ----------------------------------------------------------------------------
+   Three rules hold this together.
+
+   1. Colour is a scarce signal, not a surface. Every card face is neutral.
+      Saturation is spent on five words only:
+        green  = you can move (ready to pick up, CI passed)
+        blue   = this is yours (assigned, links, focus)
+        amber  = something is left hanging (needs wrapping up)
+        red    = it is stuck (blocked, CI failed)
+        purple = it is done (closed issue, merged pull request)
+      A card carries at most one loud colour. "Who it belongs to" is quiet,
+      because the reason line already says so in words.
+
+   2. Grouping is done with gaps, not with boxes. 6px inside a card, 16px
+      between siblings, 24px between repositories. Nothing needs a divider if
+      the distance already says it.
+
+   3. Three surfaces, in depth order: the desk (page), the graph paper (lane
+      interior, dotted so it reads as a pannable plane) and the cards, which
+      float above it. Depth is what tells you which layer you can drag.
+   ========================================================================== */
+
+:root {
+  color-scheme: light dark;
+
+  /* -- surfaces, in depth order ------------------------------------------ */
+  --desk: #eceef2;          /* page, behind the lanes */
+  --lane-bg: #f7f8fa;       /* graph paper inside a lane */
+  --grid: #e2e6ec;          /* the dots on it */
+  --surface: #ffffff;       /* lane header, top bar */
+  --surface-2: #f2f4f7;     /* inset controls, chips */
+  --surface-3: #e7eaef;     /* pressed / active */
+  --card: #ffffff;
+
+  /* -- ink ---------------------------------------------------------------- */
+  --fg: #1b1f24;            /* titles only */
+  --fg-2: #48515a;          /* body */
+  --fg-3: #666f78;          /* metadata — 4.8:1 on white */
+  --fg-4: #8b949e;          /* the quietest legible step */
+
+  /* -- lines -------------------------------------------------------------- */
+  --border: #e1e5ea;
+  --border-2: #d0d7de;
+  --edge-strong: #79838e;   /* the sub-issue trunk */
+  --edge: #a3acb6;          /* certain relations */
+  --edge-weak: #c3cad2;     /* guesses */
+
+  /* -- the five words ----------------------------------------------------- */
+  --blue: #0969da;
+  --blue-soft: #ddf4ff;
+  --green: #1a7f37;
+  --green-soft: #dcfce4;
+  --amber: #8a5d00;
+  --amber-soft: #fff4d0;
+  --red: #cf222e;
+  --red-soft: #ffe9e7;
+  --purple: #8250df;
+  --purple-soft: #f4ecff;
+
+  /* -- depth -------------------------------------------------------------- */
+  --shadow-card: 0 1px 1px rgb(16 22 26 / 4%), 0 1px 3px rgb(16 22 26 / 5%);
+  --shadow-lift: 0 2px 4px rgb(16 22 26 / 6%), 0 6px 14px rgb(16 22 26 / 8%);
+  --shadow-pop: 0 1px 2px rgb(16 22 26 / 6%);
+  --ring: 0 0 0 3px color-mix(in srgb, var(--blue) 26%, transparent);
+
+  /* -- type --------------------------------------------------------------- */
+  /* System faces only: the CSP forbids web fonts. The Japanese faces sit
+     after the Latin UI faces so Latin still renders in the platform face and
+     only the kana/kanji fall through to them. Without this, long Japanese
+     titles pick up whatever the browser has last, which is rarely a UI face. */
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic UI", "Yu Gothic",
+    Meiryo, "Noto Sans JP", "Noto Sans", Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --radius-lane: 12px;
+  --radius-card: 8px;
+  --radius-control: 7px;
+  --radius-chip: 6px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Not an inversion. The dark scale keeps the same *number of steps*
+       between surfaces, so the depth order survives; the ink steps are
+       re-tuned because light text on dark gains apparent weight. */
+    --desk: #07090c;
+    --lane-bg: #0e1218;
+    --grid: #1c232c;
+    --surface: #151a21;
+    --surface-2: #1c222b;
+    --surface-3: #262e39;
+    --card: #171d25;
+
+    --fg: #e8eef5;
+    --fg-2: #b3bdc8;
+    --fg-3: #8c96a1;
+    --fg-4: #6d7681;
+
+    --border: #262e38;
+    --border-2: #38414d;
+    --edge-strong: #8b949e;
+    --edge: #5f6975;
+    --edge-weak: #4a5461;
+
+    --blue: #4493f8;
+    --blue-soft: #0b2545;
+    --green: #43ba55;
+    --green-soft: #0d2a17;
+    --amber: #d4a02a;
+    --amber-soft: #2c2312;
+    --red: #f85149;
+    --red-soft: #2f1517;
+    --purple: #a371f7;
+    --purple-soft: #221a37;
+
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 40%);
+    --shadow-lift: 0 2px 4px rgb(0 0 0 / 40%), 0 8px 20px rgb(0 0 0 / 45%);
+    --shadow-pop: 0 2px 8px rgb(0 0 0 / 50%);
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+/* Inline glyphs are decoration. Letting one become an event target is how a
+   caret inside a button steals the click that was meant for the button. */
+svg { pointer-events: none; }
+
+body {
+  margin: 0;
+  font: 400 13px/1.5 var(--font);
+  color: var(--fg-2);
+  background: var(--desk);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+:where(a) { color: var(--blue); }
+
+:where(button, input, select, textarea):focus-visible,
+:where(a):focus-visible,
+label:has(:focus-visible) {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
+/* ===========================================================================
+   Top bar
+   One row down to 1180px. The two text fields are the only elastic things in
+   it, so the controls keep their positions as the window narrows instead of
+   reshuffling. Below 1180px it breaks into two tidy rows at a seam we choose.
+   =========================================================================== */
+
+header#topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  height: 46px;
+  flex: none;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: relative;
+  z-index: 3;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  font-size: 13px;
+  font-weight: 640;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+.brand img { display: block; }
+
+#controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The two queries are one thought, so they are one control with a seam in the
+   middle rather than two boxes with a gap. */
+.field-group {
+  display: flex;
+  align-items: center;
+  flex: 1 1 380px;
+  min-width: 190px;
+  max-width: 460px;
+  height: 28px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  transition: border-color .12s ease, box-shadow .12s ease, background .12s ease;
+}
+
+.field-group:focus-within {
+  background: var(--card);
+  border-color: var(--blue);
+  box-shadow: var(--ring);
+}
+
+.field-group input {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  padding: 0 9px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.field-group input:focus-visible { outline: none; }
+.field-group input::placeholder { color: var(--fg-4); }
+.field-group .seam {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  background: var(--border-2);
+}
+.field-group input.q { flex: 0 1 40%; }
+
+/* Segmented scope filters. Same semantics as the checkboxes they replace —
+   five independent toggles — but pressed/unpressed reads at a glance and the
+   whole cluster costs a third of the width five labelled boxes did. */
+.segmented {
+  display: flex;
+  flex: none;
+  gap: 1px;
+  padding: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}
+
+.segmented .pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--fg-3);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: background .12s ease, color .12s ease, box-shadow .12s ease;
+}
+
+.segmented .pill input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.segmented .pill:hover { color: var(--fg); background: var(--surface-3); }
+
+/* Five scopes search issues; the sixth searches pull requests. A hairline is
+   enough to say they are different sorts of thing without splitting the
+   control into two groups and spending another 10px of header on the gap. */
+.segmented .pill-review {
+  margin-left: 5px;
+  border-left: 1px solid var(--border-2);
+  padding-left: 10px;
+  border-radius: 5px;
+}
+
+.segmented .pill:has(:checked) {
+  background: var(--card);
+  color: var(--fg);
+  font-weight: 560;
+  box-shadow: var(--shadow-pop);
+}
+
+.icon-button {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+  color: var(--fg-2);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background .12s ease, color .12s ease, border-color .12s ease;
+}
+
+.icon-button:hover { background: var(--surface-3); color: var(--fg); border-color: var(--border-2); }
+.icon-button:active { transform: translateY(.5px); }
+
+.lane-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* `auto` polls; it is a view behaviour, not a search term, so it lives with
+   the view controls rather than inside the query form. */
+.toggle-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--fg-3);
+  cursor: pointer;
+  user-select: none;
+  transition: background .12s ease, color .12s ease, border-color .12s ease;
+}
+
+.toggle-pill input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.toggle-pill .dot-live {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg-4);
+  transition: background .15s ease, box-shadow .15s ease;
+}
+.toggle-pill:hover { border-color: var(--border-2); color: var(--fg-2); }
+.toggle-pill:has(:checked) { color: var(--fg); }
+.toggle-pill:has(:checked) .dot-live {
+  background: var(--green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 18%, transparent);
+}
+
+.select-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--fg-3);
+  cursor: pointer;
+}
+
+.lane-controls select {
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+  color: var(--fg-2);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.lane-controls select:hover { border-color: var(--border-2); color: var(--fg); }
+
+/* fold all / unfold all are two halves of one idea, so they share a border. */
+.button-group { display: flex; flex: none; }
+
+.button-group button {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--fg-3);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+}
+
+.button-group button:first-child { border-radius: var(--radius-control) 0 0 var(--radius-control); }
+.button-group button:last-child { border-radius: 0 var(--radius-control) var(--radius-control) 0; margin-left: -1px; }
+.button-group button:hover { background: var(--surface-3); color: var(--fg); z-index: 1; }
+
+@media (max-width: 1180px) {
+  header#topbar {
+    height: auto;
+    flex-wrap: wrap;
+    padding: 7px 14px;
+    row-gap: 8px;
+  }
+  #controls { flex-basis: 100%; order: 3; }
+  /* Wrapped, #controls owns a whole row, and an uncapped field group stretches
+     to fill it — a search box the width of the window reads as a mistake. */
+  .field-group { max-width: 560px; }
+  .lane-controls { order: 2; }
+}
+
+/* ===========================================================================
+   Progress and notices
+   =========================================================================== */
+
+#progress:not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+  height: 26px;
+  padding: 0 14px;
+  flex: none;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--fg-3);
+}
+
+/* The bar is the bottom edge of the strip: it reads as the strip filling up
+   rather than as a separate widget. */
+#progress-bar {
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  height: 2px;
+  width: 0;
+  background: var(--blue);
+  transition: width .25s ease, background .2s ease;
+}
+
+#progress::before {
+  content: "";
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--blue) 35%, transparent);
+  border-top-color: var(--blue);
+  animation: spin .7s linear infinite;
+}
+
+#progress.is-error { color: var(--red); }
+#progress.is-error #progress-bar { background: var(--red); }
+#progress.is-error::before {
+  animation: none;
+  border-color: var(--red);
+  border-radius: 2px;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+#warnings:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 14px 7px 34px;
+  flex: none;
+  position: relative;
+  background: var(--amber-soft);
+  color: var(--amber);
+  border-bottom: 1px solid color-mix(in srgb, var(--amber) 22%, transparent);
+  font-size: 11.5px;
+}
+
+#warnings::before {
+  content: "";
+  position: absolute;
+  left: 14px;
+  top: 8px;
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+#warnings p { margin: 0; }
+
+/* ===========================================================================
+   Canvas
+   =========================================================================== */
+
+#viewport {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+  cursor: grab;
+  background: var(--desk);
+  scrollbar-color: var(--border-2) transparent;
+}
+
+#viewport.grabbing { cursor: grabbing; user-select: none; }
+
+#canvas {
+  position: relative;
+  padding: 16px;
+  min-width: min-content;
+  min-height: min-content;
+}
+
+#edges {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+
+#edges path.edge {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: opacity .12s ease;
+}
+
+/* Hovering a card dims every edge that is not attached to it. With a dozen
+   lines converging on one column this is the difference between "a bundle"
+   and "this card's three children". */
+#edges.is-focused path.edge { opacity: .12; }
+#edges.is-focused path.edge.is-lit { opacity: 1; }
+
+.edge-parent { stroke: var(--edge-strong); stroke-width: 2; }
+.edge-pr-closes { stroke: var(--edge); stroke-width: 1.75; }
+.edge-pr-stack { stroke: var(--edge); stroke-width: 1.75; }
+.edge-pr-refs { stroke: var(--edge); stroke-width: 1.75; stroke-dasharray: 6 5; }
+.edge-pr-xref { stroke: var(--edge-weak); stroke-width: 1.5; stroke-dasharray: 1.5 4; }
+.edge-blocked { stroke: var(--red); stroke-width: 1.75; stroke-dasharray: 5 4; }
+.edge-duplicate { stroke: var(--edge-weak); stroke-width: 1.5; stroke-dasharray: 1.5 4; }
+
+/* ===========================================================================
+   A repository is a frame around its graph, not a node inside it.
+   =========================================================================== */
+
+.lane {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lane);
+  /* The graph paper. Its dots say "this plane pans" before you try to drag it.
+     It lives on the frame rather than on .lane-body because the body is
+     position:relative — a background there paints over #edges, which is
+     absolutely positioned and therefore lower in the stack — and because the
+     body is only as wide as its contents, so the paper would stop halfway. */
+  background-color: var(--lane-bg);
+  background-image: radial-gradient(circle at 1px 1px, var(--grid) 1px, transparent 0);
+  background-size: 22px 22px;
+  margin-bottom: 24px;
+  width: max-content;
+  min-width: 100%;
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.lane:last-child { margin-bottom: 0; }
+
+.lane-head {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  transition: background .12s ease;
+}
+
+/* The header spans the whole lane, but its contents stick to the left edge, so
+   the repository name and the fold control stay reachable however far right the
+   graph is panned. */
+.lane-head-inner {
+  position: sticky;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 14px;
+  width: max-content;
+  max-width: 100vw;
+}
+
+.lane.is-folded .lane-head { border-bottom: none; }
+.lane.is-folded .lane-body { display: none; }
+.lane-head:hover { background: var(--surface-2); }
+
+.lane-head .fold {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  color: var(--fg-4);
+  transition: transform .15s ease, color .12s ease;
+}
+
+.lane-head:hover .fold { color: var(--fg-2); }
+.lane-head .fold svg { width: 12px; height: 12px; }
+.lane-head .fold { transform: rotate(90deg); }
+.lane.is-folded .lane-head .fold { transform: rotate(0deg); }
+
+.lane-head .title {
+  font-size: 13px;
+  font-weight: 640;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+.lane-head .lane-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: var(--fg-3);
+  white-space: nowrap;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Hairline dots between the counts: cheaper than gaps at telling four numbers
+   apart, and they keep the row from reading as one long string. */
+.lane-head .lane-meta > span + span::before {
+  content: "";
+  display: inline-block;
+  width: 3px;
+  height: 3px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: var(--border-2);
+  vertical-align: middle;
+}
+
+.lane-head .branch {
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-3);
+}
+
+.lane-head .branch::before { content: none !important; }
+
+.lane-head .open {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-left: 2px;
+  border-radius: 5px;
+  color: var(--fg-4);
+  text-decoration: none;
+  transition: background .12s ease, color .12s ease;
+}
+
+.lane-head .open:hover { background: var(--surface-3); color: var(--blue); }
+
+/* The inset between the frame and the graph is in app.js (LANE_PAD), not here:
+   padding on this box does not move the absolutely positioned cards inside it,
+   and the edge router needs the same numbers the cards are placed with. */
+.lane-body {
+  position: relative;
+  box-sizing: content-box;
+}
+
+/* ===========================================================================
+   Cards
+   The face is always neutral. What varies is the 3px rail on the left (whose
+   card is this) and the glyphs in the top row (what state is it in).
+   =========================================================================== */
+
+.node {
+  position: absolute;
+  width: 290px;
+  padding: 9px 12px 9px 11px;
+  border: 1px solid var(--border);
+  /* The relation rail is the left border rather than a pseudo-element, so it
+     follows the card's rounded corners instead of squaring them off. */
+  border-left-width: 3px;
+  border-radius: var(--radius-card);
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  transition: box-shadow .13s ease, border-color .13s ease, transform .13s ease;
+}
+
+.node:hover {
+  border-color: var(--border-2);
+  box-shadow: var(--shadow-lift);
+  z-index: 2;
+}
+
+/* Blue means yours; how solid it is says how directly. Deliberately the
+   quietest colour on the card — the reason line below already spells this out
+   in words, so the rail only has to be findable, not loud. */
+.node.assigned { border-left-color: var(--blue); }
+.node.mine { border-left-color: color-mix(in srgb, var(--blue) 42%, var(--border)); }
+
+/* Pulled in only to complete the tree: nobody asked for it, so the outline is
+   provisional. */
+.node.complement {
+  border-style: dashed;
+  border-color: var(--border-2);
+  background: color-mix(in srgb, var(--card) 92%, var(--desk));
+  box-shadow: none;
+}
+
+/* Finished work recedes but keeps its shape: you should still be able to read
+   the structure of what was done without it competing for attention. */
+.node.state-closed { opacity: .58; }
+.node.state-closed:hover { opacity: 1; }
+
+.node .top {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-height: 16px;
+  font-size: 11px;
+  color: var(--fg-3);
+}
+
+.node .state {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  color: var(--fg-4);
+}
+
+.node .state svg { display: block; width: 14px; height: 14px; }
+.node.actionable .state { color: var(--green); }
+.node.state-closed .state { color: var(--purple); }
+.node.pr.open .state { color: var(--green); }
+.node.pr.merged .state { color: var(--purple); }
+.node.pr.closed .state { color: var(--red); }
+.node.pr.draft .state { color: var(--fg-4); }
+
+.node .number {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  white-space: nowrap;
+  letter-spacing: -0.01em;
+}
+
+/* Shown only for a node that is not from this lane's repository. Kept to one
+   line: a long owner/name would otherwise be the tallest thing on the card. */
+.node .repo {
+  margin-left: auto;
+  color: var(--fg-4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 52%;
+}
+
+.node .title {
+  display: block;
+  margin: 5px 0 7px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.42;
+  letter-spacing: -0.006em;
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.node .title:hover { color: var(--blue); text-decoration: underline; text-underline-offset: 2px; }
+
+.node .meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--fg-3);
+}
+
+/* The "why is this here?" line. Set apart by a hairline and a size step, so it
+   can be skipped by eye but answers the question without a trip to GitHub. */
+.reasons {
+  margin: 8px -12px -9px -11px;
+  padding: 5px 12px 5px 11px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-2) 60%, transparent);
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--fg-3);
+}
+
+.avatar {
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  vertical-align: middle;
+  background: var(--surface-2);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+/* -- chips ----------------------------------------------------------------- */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 19px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-chip);
+  background: var(--surface-2);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--fg-3);
+  white-space: nowrap;
+  cursor: default;
+}
+
+.chip svg { display: block; width: 11px; height: 11px; }
+
+/* A GitHub label's colour is how people recognise it, but 30%-alpha fills sink
+   half the palette into the background. The colour becomes a dot instead: the
+   recognition survives and the name is always at reading contrast. */
+.chip.label .dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--fg-4);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 12%);
+}
+
+.chip.type {
+  border-color: transparent;
+  background: var(--surface-3);
+  color: var(--fg-2);
+  font-weight: 560;
+}
+
+.chip.attention {
+  border-color: color-mix(in srgb, var(--amber) 28%, transparent);
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+/* Blue is "this is yours". A review request is the one thing on a pull request
+   card that is about the reader rather than about the pull request, so it takes
+   the same hue the issue rail uses — and says the words, like everything else
+   that would otherwise need a legend. */
+.chip.review-requested {
+  border-color: color-mix(in srgb, var(--blue) 30%, transparent);
+  background: var(--blue-soft);
+  color: var(--blue);
+  font-weight: 600;
+}
+
+.chip.blocked {
+  border-color: color-mix(in srgb, var(--red) 26%, transparent);
+  background: var(--red-soft);
+  color: var(--red);
+  font-variant-numeric: tabular-nums;
+}
+
+.chip.state-pill {
+  border-color: transparent;
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
+.node.pr.open .chip.state-pill { background: var(--green-soft); color: var(--green); }
+.node.pr.merged .chip.state-pill { background: var(--purple-soft); color: var(--purple); }
+.node.pr.closed .chip.state-pill { background: var(--red-soft); color: var(--red); }
+.node.pr.draft .chip.state-pill { background: var(--surface-3); color: var(--fg-3); }
+
+/* Sub-issue progress. The count alone makes you do the arithmetic; the meter
+   answers "nearly there?" before you have read the numbers. */
+.chip.progress-chip { gap: 5px; font-variant-numeric: tabular-nums; }
+
+.chip.progress-chip .meter {
+  flex: none;
+  width: 22px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.chip.progress-chip .meter i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--fg-4);
+}
+
+.chip.progress-chip.is-done { border-color: color-mix(in srgb, var(--green) 26%, transparent); color: var(--green); }
+.chip.progress-chip.is-done .meter i { background: var(--green); }
+
+button.chip {
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--fg-2);
+  transition: background .12s ease, border-color .12s ease, color .12s ease;
+}
+
+button.chip:hover { background: var(--surface-3); border-color: var(--border-2); color: var(--fg); }
+button.chip .caret { transition: transform .15s ease; }
+button.chip[aria-expanded="true"] { background: var(--surface-3); border-color: var(--border-2); color: var(--fg); }
+button.chip[aria-expanded="true"] .caret { transform: rotate(90deg); }
+
+/* -- pull requests --------------------------------------------------------- */
+
+.node.pr { width: 268px; }
+
+/* A pull request has no "whose is it?" to report, and its state is the thing
+   you are scanning a column of them for. The rail therefore repeats the state
+   pill's colour — the pill is two centimetres away and spells out the word, so
+   the mapping teaches itself and needs no legend. Green, purple and red never
+   appear on an issue's rail, so the two uses cannot be confused. */
+.node.pr.open { border-left-color: color-mix(in srgb, var(--green) 62%, var(--border)); }
+.node.pr.merged { border-left-color: color-mix(in srgb, var(--purple) 62%, var(--border)); }
+.node.pr.closed { border-left-color: color-mix(in srgb, var(--red) 62%, var(--border)); }
+.node.pr.draft { border-style: dashed; border-left-color: var(--border-2); }
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--fg-3);
+}
+
+.status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.status.ok { color: var(--green); }
+.status.warn { color: var(--amber); }
+.status.bad { color: var(--red); }
+
+/* ===========================================================================
+   Empty state
+   =========================================================================== */
+
+#empty:not([hidden]) {
+  position: fixed;
+  inset: 46px 0 30px;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  pointer-events: none;
+  text-align: center;
+  color: var(--fg-3);
+}
+
+#empty .box {
+  pointer-events: auto;
+  max-width: 380px;
+  padding: 26px 30px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lane);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+#empty .glyph { color: var(--fg-4); }
+#empty h2 { margin: 12px 0 6px; font-size: 14px; font-weight: 620; color: var(--fg); }
+#empty p { margin: 0; font-size: 12px; line-height: 1.6; }
+
+#empty code {
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-2);
+}
+
+/* ===========================================================================
+   Legend
+   Three groups — who, what state, what the lines mean — with a hairline
+   between them. Grouped, the ten keys fit one row; if they ever cannot, the
+   break happens between groups rather than mid-thought.
+   =========================================================================== */
+
+#legend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  row-gap: 4px;
+  padding: 6px 14px;
+  flex: none;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 10px;
+  color: var(--fg-3);
+}
+
+.legend-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: nowrap;
+}
+
+.legend-group + .legend-group { border-left: 1px solid var(--border); padding-left: 14px; }
+
+.key { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.key svg { display: block; width: 11px; height: 11px; }
+
+.swatch {
+  width: 10px;
+  height: 12px;
+  border-radius: 2px;
+  border: 1px solid var(--border-2);
+  background: var(--card);
+  position: relative;
+}
+
+.swatch.rail::after {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: -1px;
+  bottom: -1px;
+  width: 3px;
+  border-radius: 2px 0 0 2px;
+}
+
+.swatch.rail-assigned::after { background: var(--blue); }
+.swatch.rail-mine::after { background: color-mix(in srgb, var(--blue) 34%, transparent); }
+.swatch.complement { border-style: dashed; background: color-mix(in srgb, var(--card) 92%, var(--desk)); }
+
+.key .ready { color: var(--green); }
+.key .attention { color: var(--amber); }
+.key .blocked-glyph { color: var(--red); }
+
+.line { width: 18px; height: 0; border-top: 2px solid var(--edge); }
+.line.parent { border-top-color: var(--edge-strong); }
+.line.refs { border-top-style: dashed; }
+.line.mentions { border-top: 1px dotted var(--edge-weak); }
+.line.blocked { border-top-style: dashed; border-top-color: var(--red); }
+
+@media (max-width: 1080px) {
+  #legend { font-size: 9.5px; gap: 10px; }
+  .legend-group { gap: 9px; }
+  .legend-group + .legend-group { padding-left: 10px; }
+}
+
+/* ===========================================================================
+   Words instead of a legend
+   A colour you have to look up is not a signal, it is a puzzle. Anything the
+   reader would otherwise have to decode carries its own word: "ready" next to
+   the green glyph, "wrap up" next to the amber triangle, "closes" written on
+   the line itself. The legend at the foot of the window is then a reminder
+   rather than a dependency.
+   =========================================================================== */
+
+.flag {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.flag.ready { color: var(--green); }
+.flag.context {
+  margin-left: auto;
+  color: var(--fg-4);
+  font-weight: 500;
+  font-style: italic;
+}
+
+.flag.context + .repo { margin-left: 6px; }
+
+/* Edge labels. Small enough to ignore while you follow the shape of the tree,
+   there the moment you ask "what does this dashed one mean?". The knock-out
+   stroke is the paper colour, so the line does not run through the letters. */
+#edges text.edge-label {
+  font-family: var(--font);
+  font-size: 9.5px;
+  font-weight: 550;
+  letter-spacing: -0.01em;
+  fill: var(--fg-3);
+  paint-order: stroke fill;
+  stroke: var(--lane-bg);
+  stroke-width: 3.5px;
+  stroke-linejoin: round;
+  transition: opacity .12s ease, fill .12s ease;
+}
+
+#edges text.label-blocked { fill: var(--red); }
+#edges text.label-pr-xref { font-style: italic; }
+
+#edges.is-focused text.edge-label { opacity: .1; }
+#edges.is-focused text.edge-label.is-lit { opacity: 1; fill: var(--fg-2); }
+#edges.is-focused text.edge-label.is-lit.label-blocked { fill: var(--red); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+}
