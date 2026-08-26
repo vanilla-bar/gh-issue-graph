@@ -14,7 +14,7 @@ import (
 
 // The `refs #N` convention is what separates "merging closes this" from
 // "related, deliberately left open". Getting this parser wrong silently drops
-// roughly a third of the issue-to-pull-request links.
+// a large share of the issue-to-pull-request links.
 func TestParseRefs(t *testing.T) {
 	client := New("")
 	cases := []struct {

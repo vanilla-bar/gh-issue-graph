@@ -89,9 +89,9 @@ func (c *Client) Load(ctx context.Context, options graph.SearchOptions, progress
 
 	// Pull requests waiting on your review are your work, but they are somebody
 	// else's pull request: no issue search returns them. It is an independent
-	// query, so it runs beside the issue searches rather than after them —
-	// measured on seven repositories, waiting for it cost 2.1s of a 9.5s load
-	// and it hides entirely inside the slowest issue search.
+	// query, so it runs beside the issue searches rather than after them:
+	// in sequence its latency lands on top of the load, while alongside it
+	// hides inside the slowest issue search.
 	// Its own cancellable context: when an issue search fails there is nothing
 	// left to build, and the caller should not be held for however long the
 	// review query still has to run.
@@ -430,8 +430,8 @@ func (c *Client) search(ctx context.Context, options graph.SearchOptions, progre
 
 // inParallel runs jobs at most maxConcurrentRequests at a time and returns the
 // first error. The batched fetches below were straight loops: fine at one
-// batch, a stack of 520ms round trips as soon as a graph passes 100 issues or
-// 5 repositories.
+// batch, a stack of round trips waiting on each other as soon as a graph passes
+// 100 issues or 5 repositories.
 //
 // The limit is per call, not a pool shared with c.search and the pull request
 // scan — each of those keeps its own semaphore of the same size, and the two
@@ -774,10 +774,10 @@ func quoteJoin(values []string) string {
 // loadPullRequests fetches pull requests for every repository in the graph and
 // links them to issues.
 //
-// closingIssuesReferences alone misses roughly a third of the links in practice,
-// because a pull request that deliberately leaves its issue open writes
-// `refs #123` instead of `Closes #123`. That is why the body is fetched and
-// parsed here rather than relying on the issue side only.
+// closingIssuesReferences alone misses a large share of the links, because a
+// pull request that deliberately leaves its issue open writes `refs #123`
+// instead of `Closes #123`. That is why the body is fetched and parsed here
+// rather than relying on the issue side only.
 // seeded carries the pull requests already found by the review-requested
 // search. They join the per-repository scan's results before the link layers
 // run, so they get the same treatment as anything else and are not lost when

@@ -96,10 +96,10 @@ const ICON = {
 // survives a reload and a change of search scope.
 //
 // The set is of what is *open*, not of what is folded, because the default is
-// folded: across seven repositories the first screen is then an index you can
-// read in one glance, and you go into the one you actually meant. Storing it
-// the other way round could not express "closed by default" at all — a
-// repository has to appear in the data before its name can go in the set, so
+// folded: with several repositories on the board the first screen is then an
+// index you can read in one glance, and you go into the one you actually meant.
+// Storing it the other way round could not express "closed by default" at all —
+// a repository has to appear in the data before its name can go in the set, so
 // everything would be open on the first sight of it.
 const OPEN_KEY = 'gh-issue-graph:unfolded'
 // Deliberately still the old key: renaming it would silently reset a choice
@@ -601,8 +601,8 @@ function layoutLane(lane, laneEl) {
 
   // The widest point of *this* lane. It used to be taken from `positions`,
   // which is the whole board's map: every lane after the first inherited the
-  // width of the widest one before it, so five of seven lanes were sized at
-  // 1064px for 320px of content.
+  // width of the widest one before it, so most lanes were sized for content
+  // they did not hold.
   let widest = 0
 
   const place = (id, top) => {
