@@ -1246,3 +1246,257 @@ button.chip[aria-expanded="true"] .caret { transform: rotate(90deg); }
     transition-duration: .001ms !important;
   }
 }
+
+/* ===========================================================================
+   The reading panel
+   The board answers "what is there?"; this answers "is this the one?" without
+   a trip to GitHub. It slides in from the right and leaves the canvas usable
+   behind it, so a second card can be opened without closing the first.
+   =========================================================================== */
+
+#scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  background: color-mix(in srgb, #0b0e13 26%, transparent);
+  animation: scrim-in .16s ease;
+}
+
+@keyframes scrim-in { from { opacity: 0 } to { opacity: 1 } }
+
+#drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  width: min(880px, 78vw);
+  height: 100vh;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-lift);
+  transform: translateX(100%);
+  transition: transform .2s cubic-bezier(.22, .61, .36, 1);
+}
+
+#drawer.is-open { transform: translateX(0); }
+/* display:flex above outranks the browser's [hidden] rule, so say it here. */
+#drawer[hidden], #scrim[hidden] { display: none; }
+
+/* Somebody who has asked not to see motion still needs the panel to arrive. */
+@media (prefers-reduced-motion: reduce) {
+  #drawer { transition: none; }
+  #scrim { animation: none; }
+}
+
+#drawer-head {
+  flex: none;
+  padding: 14px 20px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Not `.line`: that one is the legend's little dash, at width 18px, and this
+   row inherited it. */
+.drawer-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--fg-3);
+}
+
+.drawer-state {
+  display: inline-flex;
+  align-items: center;
+  height: 21px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--surface-3);
+  color: var(--fg-2);
+}
+.drawer-state.open, .drawer-state.ready { background: var(--green-soft); color: var(--green); }
+.drawer-state.closed { background: var(--purple-soft); color: var(--purple); }
+.drawer-state.merged { background: var(--purple-soft); color: var(--purple); }
+.drawer-state.draft { background: var(--surface-3); color: var(--fg-3); }
+
+#drawer-number {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--fg-3);
+  text-decoration: none;
+  white-space: nowrap;
+}
+#drawer-number:hover { color: var(--blue); text-decoration: underline; }
+/* Both of these would rather wrap than shrink, and `PR #210` split over two
+   lines is the header pretending it is short of room when it is not. */
+#drawer-repo {
+  flex: 0 1 auto;
+  color: var(--fg-4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#drawer-close {
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--fg-3);
+  cursor: pointer;
+}
+#drawer-close:hover { background: var(--surface-3); color: var(--fg); }
+#drawer-close svg { width: 15px; height: 15px; }
+
+#drawer-title {
+  margin: 8px 0 0;
+  font-size: 19px;
+  font-weight: 640;
+  line-height: 1.35;
+  letter-spacing: -0.012em;
+  color: var(--fg);
+}
+
+#drawer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
+}
+#drawer-chips:empty { display: none; }
+
+.drawer-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 340px;
+  height: 21px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-chip);
+  background: var(--surface-2);
+  font-size: 10.5px;
+  color: var(--fg-3);
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+a.drawer-chip:hover { border-color: var(--border-2); color: var(--fg-2); }
+
+/* Two columns: the body to read, and the facts to glance at. */
+#drawer-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 236px;
+  gap: 0;
+  min-height: 0;
+}
+
+#drawer-markdown {
+  padding: 18px 20px 40px;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--fg-2);
+}
+
+#drawer-side {
+  padding: 18px 20px 40px;
+  border-left: 1px solid var(--border);
+  background: var(--lane-bg);
+  overflow-y: auto;
+}
+
+@media (max-width: 900px) {
+  #drawer { width: 100vw; }
+  #drawer-body { grid-template-columns: minmax(0, 1fr); }
+  #drawer-side { border-left: 0; border-top: 1px solid var(--border); }
+}
+
+.side-block { margin-bottom: 16px; }
+.side-block h3 {
+  margin: 0 0 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+}
+.side-plain { margin: 0; font-size: 12px; color: var(--fg-2); }
+.side-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.side-list, .side-people { margin: 0; padding: 0; list-style: none; font-size: 12px; }
+.side-list li { margin-bottom: 5px; line-height: 1.45; color: var(--fg-3); }
+.side-list a { font-variant-numeric: tabular-nums; text-decoration: none; }
+.side-list a:hover { text-decoration: underline; }
+.side-people li { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; color: var(--fg-2); }
+
+/* The body arrives as GitHub's own HTML. The CSP drops its style attributes and
+   this page carries none of GitHub's classes, so the structure lands bare and
+   every element it can contain is given a shape here. */
+#drawer-markdown > :first-child { margin-top: 0; }
+#drawer-markdown h1, #drawer-markdown h2, #drawer-markdown h3,
+#drawer-markdown h4, #drawer-markdown h5, #drawer-markdown h6 {
+  margin: 22px 0 8px;
+  font-weight: 640;
+  line-height: 1.35;
+  letter-spacing: -0.008em;
+  color: var(--fg);
+}
+#drawer-markdown h1 { font-size: 17px; }
+#drawer-markdown h2 { font-size: 15.5px; }
+#drawer-markdown h3 { font-size: 14px; }
+#drawer-markdown h4, #drawer-markdown h5, #drawer-markdown h6 { font-size: 13px; }
+#drawer-markdown p { margin: 0 0 11px; }
+#drawer-markdown ul, #drawer-markdown ol { margin: 0 0 11px; padding-left: 22px; }
+#drawer-markdown li { margin-bottom: 4px; }
+#drawer-markdown a { text-decoration: none; }
+#drawer-markdown a:hover { text-decoration: underline; }
+#drawer-markdown code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--surface-2);
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+#drawer-markdown pre {
+  margin: 0 0 12px;
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+  overflow-x: auto;
+}
+#drawer-markdown pre code { padding: 0; background: none; font-size: 11.5px; line-height: 1.55; }
+#drawer-markdown blockquote {
+  margin: 0 0 12px;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--border-2);
+  color: var(--fg-3);
+}
+#drawer-markdown table {
+  margin: 0 0 12px;
+  border-collapse: collapse;
+  font-size: 12px;
+  /* A wide table scrolls its own way rather than stretching the column. */
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+#drawer-markdown th, #drawer-markdown td {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  text-align: left;
+}
+#drawer-markdown th { background: var(--surface-2); font-weight: 600; color: var(--fg-2); }
+#drawer-markdown img { max-width: 100%; border-radius: var(--radius-card); }
+#drawer-markdown hr { margin: 18px 0; border: 0; border-top: 1px solid var(--border); }
+#drawer-markdown input[type="checkbox"] { margin-right: 6px; }

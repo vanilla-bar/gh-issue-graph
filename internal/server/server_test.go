@@ -29,6 +29,111 @@ func (f *fakeLoader) Load(ctx context.Context, options graph.SearchOptions, prog
 	return f.input, f.err
 }
 
+// A loader that can also hand over a body. fakeLoader deliberately cannot, so
+// the two together cover both sides of the optional interface.
+type detailingLoader struct {
+	fakeLoader
+	body    string
+	err     error
+	askedID string
+}
+
+func (d *detailingLoader) Detail(ctx context.Context, id string) (graph.Detail, error) {
+	d.askedID = id
+	if d.err != nil {
+		return graph.Detail{}, d.err
+	}
+	return graph.Detail{ID: id, BodyHTML: d.body}, nil
+}
+
+func TestDetailEndpointReturnsTheBody(t *testing.T) {
+	loader := &detailingLoader{body: "<p>why this matters</p>"}
+	server := httptest.NewServer((&Server{Loader: loader}).handler())
+	defer server.Close()
+
+	response, err := http.Get(server.URL + "/api/v1/detail?id=I_100")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.StatusCode)
+	}
+	var detail graph.Detail
+	if err := json.NewDecoder(response.Body).Decode(&detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.BodyHTML != loader.body {
+		t.Fatalf("bodyHtml = %q, want %q", detail.BodyHTML, loader.body)
+	}
+	if loader.askedID != "I_100" {
+		t.Fatalf("the loader was asked for %q, want I_100", loader.askedID)
+	}
+}
+
+// A body arrives as HTML and goes into the page as HTML. The CSP is what keeps
+// that safe, so it has to be on this response too — not only on the document.
+func TestDetailEndpointCarriesTheContentSecurityPolicy(t *testing.T) {
+	server := httptest.NewServer((&Server{Loader: &detailingLoader{body: "<p>hi</p>"}}).handler())
+	defer server.Close()
+
+	response, err := http.Get(server.URL + "/api/v1/detail?id=I_100")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	policy := response.Header.Get("Content-Security-Policy")
+	for _, want := range []string{"script-src 'self'", "default-src 'self'"} {
+		if !strings.Contains(policy, want) {
+			t.Fatalf("policy %q is missing %q", policy, want)
+		}
+	}
+}
+
+// The demo loader can do this; a loader that cannot should say so rather than
+// leaving the page waiting.
+func TestDetailEndpointSaysWhenTheLoaderCannot(t *testing.T) {
+	server := httptest.NewServer((&Server{Loader: &fakeLoader{}}).handler())
+	defer server.Close()
+
+	response, err := http.Get(server.URL + "/api/v1/detail?id=I_100")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want 501", response.StatusCode)
+	}
+}
+
+func TestDetailEndpointNeedsAnID(t *testing.T) {
+	server := httptest.NewServer((&Server{Loader: &detailingLoader{}}).handler())
+	defer server.Close()
+
+	response, err := http.Get(server.URL + "/api/v1/detail")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", response.StatusCode)
+	}
+}
+
+func TestDetailEndpointReportsAFailedFetch(t *testing.T) {
+	server := httptest.NewServer((&Server{Loader: &detailingLoader{err: errors.New("gh exploded")}}).handler())
+	defer server.Close()
+
+	response, err := http.Get(server.URL + "/api/v1/detail?id=I_100")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", response.StatusCode)
+	}
+}
+
 func TestParseOptionsDefaultsToEveryScope(t *testing.T) {
 	options := ParseOptions(url.Values{})
 	if !options.Assigned || !options.Authored || !options.Mentioned {

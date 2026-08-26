@@ -138,6 +138,17 @@ Which repositories you opened, what you folded inside them and which cards you
 tucked are all remembered in `localStorage`, so you land back where you were
 after a reload. `unfold all` opens the folds; it leaves tucked cards tucked.
 
+### Reading a body
+
+Click a card anywhere that is not a link or a button and a panel slides in from
+the right with the body in it. `✕`, Escape, or a click outside closes it.
+
+The body is GitHub's own HTML, fetched one issue or pull request at a time and
+only when you open one; what you have already read is not fetched again until
+you reload. The column beside it lists the assignees, labels, type and milestone
+along with the parents, children, blockers and linked pull requests — all of it
+from the first load, so nothing extra is requested for it.
+
 ### Edges
 
 | Line | Meaning |

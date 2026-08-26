@@ -34,6 +34,46 @@ func user(login string) graph.User {
 	return graph.User{Login: login, AvatarURL: avatar}
 }
 
+// Detail implements server.Detailer. The bodies are canned like everything else
+// here, and cover what the drawer has to lay out: headings, a list, a table,
+// code and a quote.
+func (l *Loader) Detail(ctx context.Context, id string) (graph.Detail, error) {
+	if body, ok := demoBodies[id]; ok {
+		return graph.Detail{ID: id, BodyHTML: body}, nil
+	}
+	return graph.Detail{ID: id, BodyHTML: "<p><em>No description provided.</em></p>"}, nil
+}
+
+// The fixture's bodies, as GitHub would render them: plain HTML with no style
+// attributes, which is exactly what the CSP allows through.
+var demoBodies = map[string]string{
+	"I_100": `<h2>Why</h2>
+<p>Steps currently belong to the account rather than to a recipe, so two recipes
+cannot have a step with the same name. Moving them under the recipe fixes that
+and lets a recipe be copied whole.</p>
+<h2>Shape</h2>
+<table><thead><tr><th>Before</th><th>After</th></tr></thead>
+<tbody><tr><td><code>account/steps</code></td><td><code>recipe/steps</code></td></tr>
+<tr><td>flat</td><td>nested</td></tr></tbody></table>
+<h2>Order</h2>
+<ol><li>Write the decision down (#101)</li>
+<li>Move the editor over (#102)</li>
+<li>Warn before a delete takes notes with it (#103)</li></ol>
+<blockquote><p>Migration runs on first launch and is not reversible.</p></blockquote>`,
+	"I_120": `<p>Import a recipe from a Markdown file so it can be kept in a repository.</p>
+<pre><code>gh recipe import ./dinner.md
+</code></pre>
+<ul><li>Headings become steps</li><li>A list under a heading becomes its ingredients</li>
+<li>Anything else is kept as a note</li></ul>`,
+	"PR_210": `<p>Closes #120.</p>
+<p>Parses the file into the intermediate representation from PR #211, then writes
+it through the normal recipe path so nothing new touches the database.</p>`,
+	"PR_230": `<p>Closes #130.</p>
+<p>The 1x set was picked whichever screen asked, so a high-DPI display scaled it
+up and blurred it. This reads <code>devicePixelRatio</code> and asks for the 2x
+set above 1.5.</p>`,
+}
+
 // Load implements server.Loader.
 func (l *Loader) Load(ctx context.Context, options graph.SearchOptions, progress github.Progress) (graph.Input, error) {
 	if progress != nil {
